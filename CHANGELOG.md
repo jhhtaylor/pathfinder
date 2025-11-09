@@ -2,6 +2,14 @@
 
 All notable changes to the Pathfinder extension will be documented in this file.
 
+## [0.1.1] - 2025-11-09
+
+### Changed
+- Updated extension name to "pathfinder-code-paths" to avoid marketplace conflicts
+- Updated display name to "Pathfinder - Code Paths"
+- Added orange gallery banner to marketplace page
+- Added repository information and GitHub links
+
 ## [0.1.0] - 2025-11-09
 
 ### Added

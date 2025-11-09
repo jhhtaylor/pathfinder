@@ -12,7 +12,11 @@
   },
   "description": "Track and navigate through code logic flows by marking lines of code",
   "icon": "media/pathfinder.png",
-  "version": "0.1.0",
+  "galleryBanner": {
+    "color": "#FF914D",
+    "theme": "dark"
+  },
+  "version": "0.1.1",
   "engines": {
     "vscode": "^1.99.0"
   },
