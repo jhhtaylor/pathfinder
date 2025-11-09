@@ -1,10 +1,14 @@
 {
-  "name": "pathfinder",
-  "displayName": "Pathfinder - Code Path Tracker",
+  "name": "pathfinder-code-paths",
+  "displayName": "Pathfinder - Code Paths",
   "publisher": "jhhtaylor",
   "author": {
     "name": "Jon Taylor",
     "email": "jhhtaylor@gmail.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jhhtaylor/pathfinder"
   },
   "description": "Track and navigate through code logic flows by marking lines of code",
   "icon": "media/pathfinder.png",
