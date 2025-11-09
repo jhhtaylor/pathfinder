@@ -1,0 +1,221 @@
+{
+  "name": "pathfinder",
+  "displayName": "Pathfinder - Code Path Tracker",
+  "publisher": "jhhtaylor",
+  "author": {
+    "name": "Jon Taylor",
+    "email": "jhhtaylor@gmail.com"
+  },
+  "description": "Track and navigate through code logic flows by marking lines of code",
+  "icon": "media/pathfinder.png",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.99.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "Code Navigation",
+    "Bookmarks",
+    "Code Flow",
+    "Tracing",
+    "Navigation"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "pathfinder.addToCodePath",
+        "category": "Pathfinder",
+        "title": "Add to Code Path...",
+        "icon": "$(plus)"
+      },
+      {
+        "command": "pathfinder.createNewPath",
+        "category": "Pathfinder",
+        "title": "Create New Code Path",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "pathfinder.deletePath",
+        "category": "Pathfinder",
+        "title": "Delete Code Path",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "pathfinder.renamePath",
+        "category": "Pathfinder",
+        "title": "Rename Code Path...",
+        "icon": "$(pencil)"
+      },
+      {
+        "command": "pathfinder.navigateToStep",
+        "category": "Pathfinder",
+        "title": "Navigate to Step",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "pathfinder.removeStep",
+        "category": "Pathfinder",
+        "title": "Remove Step",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "pathfinder.nextStep",
+        "category": "Pathfinder",
+        "title": "Go to Next Step",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "pathfinder.previousStep",
+        "category": "Pathfinder",
+        "title": "Go to Previous Step",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "pathfinder.playPath",
+        "category": "Pathfinder",
+        "title": "Play Code Path",
+        "icon": "$(play)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "pathfinder",
+          "title": "Pathfinder",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "pathfinder": [
+        {
+          "id": "pathfinder",
+          "name": "Code Paths"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "pathfinder.createNewPath",
+          "when": "view == pathfinder",
+          "group": "navigation@0"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "pathfinder.addToCodePath",
+          "group": "pathfinder@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "pathfinder.renamePath",
+          "when": "view == pathfinder && viewItem == path",
+          "group": "inline@0"
+        },
+        {
+          "command": "pathfinder.playPath",
+          "when": "view == pathfinder && viewItem == path",
+          "group": "inline@1"
+        },
+        {
+          "command": "pathfinder.deletePath",
+          "when": "view == pathfinder && viewItem == path",
+          "group": "inline@2"
+        },
+        {
+          "command": "pathfinder.navigateToStep",
+          "when": "view == pathfinder && viewItem == step",
+          "group": "inline@0"
+        },
+        {
+          "command": "pathfinder.removeStep",
+          "when": "view == pathfinder && viewItem == step",
+          "group": "inline@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "pathfinder.addToCodePath"
+        },
+        {
+          "command": "pathfinder.createNewPath"
+        },
+        {
+          "command": "pathfinder.nextStep"
+        },
+        {
+          "command": "pathfinder.previousStep"
+        },
+        {
+          "command": "pathfinder.navigateToStep",
+          "when": "false"
+        },
+        {
+          "command": "pathfinder.removeStep",
+          "when": "false"
+        },
+        {
+          "command": "pathfinder.deletePath",
+          "when": "false"
+        },
+        {
+          "command": "pathfinder.renamePath",
+          "when": "false"
+        },
+        {
+          "command": "pathfinder.playPath",
+          "when": "false"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "pathfinder.addToCodePath",
+        "key": "ctrl+alt+p",
+        "mac": "cmd+alt+p"
+      },
+      {
+        "command": "pathfinder.nextStep",
+        "key": "ctrl+alt+down",
+        "mac": "cmd+alt+down"
+      },
+      {
+        "command": "pathfinder.previousStep",
+        "key": "ctrl+alt+up",
+        "mac": "cmd+alt+up"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "webpack",
+    "watch": "webpack --watch",
+    "package": "webpack --mode production --devtool hidden-source-map",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/node": "24.x",
+    "@types/vscode": "^1.99.0",
+    "@typescript-eslint/eslint-plugin": "^8.38.0",
+    "@typescript-eslint/parser": "^8.33.1",
+    "@vscode/test-electron": "^2.4.1",
+    "eslint": "^9.30.1",
+    "ts-loader": "^9.5.2",
+    "typescript": "^5.8.3",
+    "webpack": "^5.101.0",
+    "webpack-cli": "^6.0.1"
+  }
+}
