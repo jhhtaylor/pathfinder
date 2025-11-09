@@ -2,7 +2,7 @@
 
 All notable changes to the Pathfinder extension will be documented in this file.
 
-## [0.1.1] - 2025-11-09
+## [0.1.1-0.1.2] - 2025-11-09
 
 ### Changed
 - Updated extension name to "pathfinder-code-paths" to avoid marketplace conflicts
