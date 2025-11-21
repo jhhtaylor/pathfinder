@@ -16,7 +16,7 @@
     "color": "#FF914D",
     "theme": "dark"
   },
-  "version": "0.1.2",
+  "version": "0.1.3",
   "engines": {
     "vscode": "^1.99.0"
   },
@@ -89,6 +89,54 @@
         "category": "Pathfinder",
         "title": "Play Code Path",
         "icon": "$(play)"
+      },
+      {
+        "command": "pathfinder.pausePlayPath",
+        "category": "Pathfinder",
+        "title": "Pause Playing Code Path",
+        "icon": "$(debug-pause)"
+      },
+      {
+        "command": "pathfinder.resumePlayPath",
+        "category": "Pathfinder",
+        "title": "Resume Playing Code Path",
+        "icon": "$(play)"
+      },
+      {
+        "command": "pathfinder.stopPlayPath",
+        "category": "Pathfinder",
+        "title": "Stop Playing Code Path",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "pathfinder.exportCodePaths",
+        "category": "Pathfinder",
+        "title": "Export Code Paths...",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "pathfinder.importCodePaths",
+        "category": "Pathfinder",
+        "title": "Import Code Paths...",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "pathfinder.collapseAll",
+        "category": "Pathfinder",
+        "title": "Collapse All Code Paths",
+        "icon": "$(collapse-all)"
+      },
+      {
+        "command": "pathfinder.expandAll",
+        "category": "Pathfinder",
+        "title": "Expand All Code Paths",
+        "icon": "$(expand-all)"
+      },
+      {
+        "command": "pathfinder.showMoreOptions",
+        "category": "Pathfinder",
+        "title": "More Options...",
+        "icon": "$(ellipsis)"
       }
     ],
     "viewsContainers": {
@@ -114,6 +162,21 @@
           "command": "pathfinder.createNewPath",
           "when": "view == pathfinder",
           "group": "navigation@0"
+        },
+        {
+          "command": "pathfinder.collapseAll",
+          "when": "view == pathfinder && !pathfinder:allCollapsed",
+          "group": "navigation@1"
+        },
+        {
+          "command": "pathfinder.expandAll",
+          "when": "view == pathfinder && pathfinder:allCollapsed",
+          "group": "navigation@1"
+        },
+        {
+          "command": "pathfinder.showMoreOptions",
+          "when": "view == pathfinder",
+          "group": "navigation@2"
         }
       ],
       "editor/context": [
@@ -130,7 +193,22 @@
         },
         {
           "command": "pathfinder.playPath",
-          "when": "view == pathfinder && viewItem == path",
+          "when": "view == pathfinder && viewItem == path && !pathfinder:isPlaying",
+          "group": "inline@1"
+        },
+        {
+          "command": "pathfinder.pausePlayPath",
+          "when": "view == pathfinder && pathfinder:isPlaying && !pathfinder:isPaused",
+          "group": "inline@1"
+        },
+        {
+          "command": "pathfinder.resumePlayPath",
+          "when": "view == pathfinder && pathfinder:isPlaying && pathfinder:isPaused",
+          "group": "inline@1"
+        },
+        {
+          "command": "pathfinder.stopPlayPath",
+          "when": "view == pathfinder && pathfinder:isPlaying",
           "group": "inline@1"
         },
         {
@@ -181,6 +259,32 @@
         {
           "command": "pathfinder.playPath",
           "when": "false"
+        },
+        {
+          "command": "pathfinder.pausePlayPath"
+        },
+        {
+          "command": "pathfinder.resumePlayPath"
+        },
+        {
+          "command": "pathfinder.stopPlayPath"
+        },
+        {
+          "command": "pathfinder.exportCodePaths"
+        },
+        {
+          "command": "pathfinder.importCodePaths"
+        },
+        {
+          "command": "pathfinder.collapseAll",
+          "when": "false"
+        },
+        {
+          "command": "pathfinder.expandAll",
+          "when": "false"
+        },
+        {
+          "command": "pathfinder.showMoreOptions"
         }
       ]
     },
@@ -200,7 +304,29 @@
         "key": "ctrl+alt+up",
         "mac": "cmd+alt+up"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Pathfinder",
+      "properties": {
+        "pathfinder.playDelaySeconds": {
+          "type": "number",
+          "default": 1.5,
+          "minimum": 0.5,
+          "maximum": 10,
+          "description": "Delay in seconds between steps when playing a code path. The default is 1.5 seconds."
+        },
+        "pathfinder.importExportDirectory": {
+          "type": "string",
+          "default": "",
+          "description": "Directory for importing/exporting code paths. Can be absolute or relative to workspace root. Leave empty to use default."
+        },
+        "pathfinder.promptForName": {
+          "type": "boolean",
+          "default": false,
+          "description": "Prompt for a custom name when creating a new code path. When disabled, paths are automatically named 'Code Path 1', 'Code Path 2', etc."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
@@ -215,12 +341,16 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@types/glob": "^9.0.0",
+    "@types/mocha": "^10.0.10",
     "@types/node": "24.x",
     "@types/vscode": "^1.99.0",
     "@typescript-eslint/eslint-plugin": "^8.38.0",
     "@typescript-eslint/parser": "^8.33.1",
     "@vscode/test-electron": "^2.4.1",
     "eslint": "^9.30.1",
+    "glob": "^13.0.0",
+    "mocha": "^11.7.5",
     "ts-loader": "^9.5.2",
     "typescript": "^5.8.3",
     "webpack": "^5.101.0",

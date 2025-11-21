@@ -2,6 +2,20 @@
 
 All notable changes to the Pathfinder extension will be documented in this file.
 
+## [0.1.3] - 2025-11-21
+
+### Added
+- Import and export code paths to/from JSON files
+- Configurable play delay setting (0.5-10 seconds, default: 1.5s)
+- Pause, resume, and stop controls during code path playback
+- Collapse all/expand all toggle button for code paths
+- More options menu with links to settings, feedback, and support
+- Setting to disable name prompts (automatically names paths "Code Path 1", "Code Path 2", etc.)
+- Comprehensive unit tests for data provider and models
+
+### Fixed
+- ESLint configuration to properly recognize Node.js globals (setTimeout, etc.)
+
 ## [0.1.1-0.1.2] - 2025-11-09
 
 ### Changed

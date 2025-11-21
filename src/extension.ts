@@ -4,17 +4,50 @@ import { CodePath, PathStep } from './models/CodePath';
 
 let treeDataProvider: PathfinderDataProvider;
 let currentStepDecorationType: vscode.TextEditorDecorationType;
+let collapsedPaths: Set<string>;
+
+// Play state management
+let isPlaying = false;
+let isPaused = false;
+let shouldStopPlaying = false;
+let pauseResolve: (() => void) | null = null;
 
 export function activate(context: vscode.ExtensionContext) {
     // Initialize the tree data provider
     treeDataProvider = new PathfinderDataProvider(context.workspaceState);
+    collapsedPaths = new Set<string>();
+
+    const updateCollapsedContext = () => {
+        const allPaths = treeDataProvider.getCodePaths();
+        const allCollapsed = allPaths.length > 0 && collapsedPaths.size === allPaths.length;
+        vscode.commands.executeCommand('setContext', 'pathfinder:allCollapsed', allCollapsed);
+    };
 
     // Create the tree view
     const treeView = vscode.window.createTreeView('pathfinder', {
         treeDataProvider: treeDataProvider,
-        showCollapseAll: true,
+        showCollapseAll: false,
         dragAndDropController: treeDataProvider
     });
+
+    // Track manual expand/collapse to update the icon
+    context.subscriptions.push(
+        treeView.onDidExpandElement((e) => {
+            if (e.element instanceof CodePath) {
+                collapsedPaths.delete(e.element.id);
+                updateCollapsedContext();
+            }
+        })
+    );
+
+    context.subscriptions.push(
+        treeView.onDidCollapseElement((e) => {
+            if (e.element instanceof CodePath) {
+                collapsedPaths.add(e.element.id);
+                updateCollapsedContext();
+            }
+        })
+    );
 
     // Create decoration type for highlighting current step
     currentStepDecorationType = vscode.window.createTextEditorDecorationType({
@@ -23,6 +56,11 @@ export function activate(context: vscode.ExtensionContext) {
         overviewRulerColor: new vscode.ThemeColor('editorOverviewRuler.findMatchForeground'),
         overviewRulerLane: vscode.OverviewRulerLane.Center
     });
+
+    // Initialize context for play controls
+    vscode.commands.executeCommand('setContext', 'pathfinder:isPlaying', false);
+    vscode.commands.executeCommand('setContext', 'pathfinder:isPaused', false);
+    updateCollapsedContext();
 
     // Register commands
     context.subscriptions.push(
@@ -35,6 +73,14 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('pathfinder.nextStep', nextStep),
         vscode.commands.registerCommand('pathfinder.previousStep', previousStep),
         vscode.commands.registerCommand('pathfinder.playPath', playPath),
+        vscode.commands.registerCommand('pathfinder.pausePlayPath', pausePlayPath),
+        vscode.commands.registerCommand('pathfinder.resumePlayPath', resumePlayPath),
+        vscode.commands.registerCommand('pathfinder.stopPlayPath', stopPlayPath),
+        vscode.commands.registerCommand('pathfinder.exportCodePaths', () => exportCodePaths()),
+        vscode.commands.registerCommand('pathfinder.importCodePaths', () => importCodePaths()),
+        vscode.commands.registerCommand('pathfinder.collapseAll', () => collapseAll(treeView, updateCollapsedContext)),
+        vscode.commands.registerCommand('pathfinder.expandAll', () => expandAll(treeView, updateCollapsedContext)),
+        vscode.commands.registerCommand('pathfinder.showMoreOptions', showMoreOptions),
         treeView
     );
 }
@@ -55,18 +101,27 @@ function getDefaultPathName(): string {
 }
 
 async function createNewPath() {
-    const name = await vscode.window.showInputBox({
-        prompt: 'Enter a name for the new code path',
-        placeHolder: 'e.g., User Authentication Flow'
-    });
+    const promptForName = vscode.workspace.getConfiguration('pathfinder').get<boolean>('promptForName', false);
 
-    // If user cancels (undefined), don't create anything
-    if (name === undefined) {
-        return;
+    let finalName: string;
+
+    if (promptForName) {
+        const name = await vscode.window.showInputBox({
+            prompt: 'Enter a name for the new code path',
+            placeHolder: 'e.g., User Authentication Flow'
+        });
+
+        // If user cancels (undefined), don't create anything
+        if (name === undefined) {
+            return;
+        }
+
+        // If user presses enter without typing (empty string), use default name
+        finalName = name.trim() || getDefaultPathName();
+    } else {
+        // Automatically use default name
+        finalName = getDefaultPathName();
     }
-
-    // If user presses enter without typing (empty string), use default name
-    const finalName = name.trim() || getDefaultPathName();
 
     treeDataProvider.createCodePath(finalName);
     vscode.window.showInformationMessage(`Code path "${finalName}" created!`);
@@ -97,18 +152,26 @@ async function addToCodePath() {
         });
 
         if (createNew) {
-            const name = await vscode.window.showInputBox({
-                prompt: 'Enter a name for the new code path',
-                placeHolder: 'e.g., User Authentication Flow'
-            });
+            const promptForName = vscode.workspace.getConfiguration('pathfinder').get<boolean>('promptForName', false);
+            let finalName: string;
 
-            // If user cancels, don't create
-            if (name === undefined) {
-                return;
+            if (promptForName) {
+                const name = await vscode.window.showInputBox({
+                    prompt: 'Enter a name for the new code path',
+                    placeHolder: 'e.g., User Authentication Flow'
+                });
+
+                // If user cancels, don't create
+                if (name === undefined) {
+                    return;
+                }
+
+                // Use default name if empty
+                finalName = name.trim() || getDefaultPathName();
+            } else {
+                finalName = getDefaultPathName();
             }
 
-            // Use default name if empty
-            const finalName = name.trim() || getDefaultPathName();
             const newPath = treeDataProvider.createCodePath(finalName);
             treeDataProvider.addStepToPath(newPath.id, filePath, lineNumber, columnNumber, lineText);
             vscode.window.showInformationMessage(`Added line ${lineNumber + 1} to "${finalName}"`);
@@ -140,18 +203,26 @@ async function addToCodePath() {
 
     if (selected) {
         if (selected.pathId === '__new__') {
-            const name = await vscode.window.showInputBox({
-                prompt: 'Enter a name for the new code path',
-                placeHolder: 'e.g., User Authentication Flow'
-            });
+            const promptForName = vscode.workspace.getConfiguration('pathfinder').get<boolean>('promptForName', false);
+            let finalName: string;
 
-            // If user cancels, don't create
-            if (name === undefined) {
-                return;
+            if (promptForName) {
+                const name = await vscode.window.showInputBox({
+                    prompt: 'Enter a name for the new code path',
+                    placeHolder: 'e.g., User Authentication Flow'
+                });
+
+                // If user cancels, don't create
+                if (name === undefined) {
+                    return;
+                }
+
+                // Use default name if empty
+                finalName = name.trim() || getDefaultPathName();
+            } else {
+                finalName = getDefaultPathName();
             }
 
-            // Use default name if empty
-            const finalName = name.trim() || getDefaultPathName();
             const newPath = treeDataProvider.createCodePath(finalName);
             treeDataProvider.addStepToPath(newPath.id, filePath, lineNumber, columnNumber, lineText);
             vscode.window.showInformationMessage(`Added line ${lineNumber + 1} to "${finalName}"`);
@@ -315,18 +386,178 @@ async function playPath(item: CodePath) {
         return;
     }
 
-    const delayMs = 1500; // 1.5 seconds between steps
-
-    for (let i = 0; i < item.steps.length; i++) {
-        const step = item.steps[i];
-        await navigateToStep(step);
-
-        if (i < item.steps.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, delayMs));
-        }
+    if (isPlaying) {
+        vscode.window.showWarningMessage('Already playing a code path');
+        return;
     }
 
-    vscode.window.showInformationMessage(`Finished playing code path "${item.label}"`);
+    isPlaying = true;
+    isPaused = false;
+    shouldStopPlaying = false;
+    vscode.commands.executeCommand('setContext', 'pathfinder:isPlaying', true);
+    vscode.commands.executeCommand('setContext', 'pathfinder:isPaused', false);
+
+    const delaySeconds = vscode.workspace.getConfiguration('pathfinder').get<number>('playDelaySeconds', 1.5);
+    const delayMs = delaySeconds * 1000;
+
+    try {
+        for (let i = 0; i < item.steps.length; i++) {
+            if (shouldStopPlaying) {
+                vscode.window.showInformationMessage('Playback stopped');
+                break;
+            }
+
+            const step = item.steps[i];
+            await navigateToStep(step);
+
+            if (i < item.steps.length - 1) {
+                // Wait for delay, but check for pause/stop
+                const startTime = Date.now();
+                while (Date.now() - startTime < delayMs) {
+                    if (shouldStopPlaying) {
+                        break;
+                    }
+
+                    if (isPaused) {
+                        // Wait for resume
+                        await new Promise<void>(resolve => {
+                            pauseResolve = resolve;
+                        });
+                        pauseResolve = null;
+
+                        // Replay the current step after resuming for smoother UX
+                        await navigateToStep(step);
+                    }
+
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+            }
+        }
+
+        if (!shouldStopPlaying) {
+            vscode.window.showInformationMessage(`Finished playing code path "${item.label}"`);
+        }
+    } finally {
+        isPlaying = false;
+        isPaused = false;
+        shouldStopPlaying = false;
+        pauseResolve = null;
+        vscode.commands.executeCommand('setContext', 'pathfinder:isPlaying', false);
+        vscode.commands.executeCommand('setContext', 'pathfinder:isPaused', false);
+    }
+}
+
+function pausePlayPath() {
+    if (!isPlaying || isPaused) {
+        return;
+    }
+    isPaused = true;
+    vscode.commands.executeCommand('setContext', 'pathfinder:isPaused', true);
+    vscode.window.showInformationMessage('Playback paused');
+}
+
+function resumePlayPath() {
+    if (!isPlaying || !isPaused) {
+        return;
+    }
+    isPaused = false;
+    vscode.commands.executeCommand('setContext', 'pathfinder:isPaused', false);
+    if (pauseResolve) {
+        pauseResolve();
+    }
+    vscode.window.showInformationMessage('Playback resumed');
+}
+
+function stopPlayPath() {
+    if (!isPlaying) {
+        return;
+    }
+    shouldStopPlaying = true;
+    if (isPaused && pauseResolve) {
+        pauseResolve();
+    }
+}
+
+async function exportCodePaths() {
+    await treeDataProvider.exportCodePathsToFile();
+}
+
+async function importCodePaths() {
+    await treeDataProvider.importCodePathsFromFile();
+}
+
+async function collapseAll(treeView: vscode.TreeView<CodePath | PathStep>, updateCollapsedContext: () => void) {
+    const codePaths = treeDataProvider.getCodePaths();
+    const firstPath = codePaths[0];
+    if (!firstPath) {
+        return;
+    }
+
+    await treeView.reveal(firstPath, {
+        select: false,
+        focus: true,
+        expand: false,
+    });
+    vscode.commands.executeCommand('list.collapseAll');
+    collapsedPaths.clear();
+    codePaths.forEach(path => collapsedPaths.add(path.id));
+    updateCollapsedContext();
+}
+
+async function expandAll(treeView: vscode.TreeView<CodePath | PathStep>, updateCollapsedContext: () => void) {
+    const codePaths = treeDataProvider.getCodePaths();
+    if (codePaths.length === 0) {
+        return;
+    }
+    let first = true;
+    for (const path of codePaths) {
+        await treeView.reveal(path, {
+            select: false,
+            focus: first,
+            expand: true,
+        });
+        first = false;
+        collapsedPaths.delete(path.id);
+    }
+    updateCollapsedContext();
+}
+
+async function showMoreOptions() {
+    const picked = await vscode.window.showQuickPick(
+        [
+            'Export Code Paths',
+            'Import Code Paths',
+            'Settings',
+            'Feedback',
+            'Support'
+        ],
+        { placeHolder: 'Select an option' }
+    );
+
+    switch (picked) {
+        case 'Export Code Paths':
+            await exportCodePaths();
+            break;
+        case 'Import Code Paths':
+            await importCodePaths();
+            break;
+        case 'Settings':
+            await vscode.commands.executeCommand(
+                'workbench.action.openSettings',
+                '@ext:jhhtaylor.pathfinder-code-paths'
+            );
+            break;
+        case 'Feedback':
+            await vscode.env.openExternal(
+                vscode.Uri.parse('https://github.com/jhhtaylor/pathfinder/issues')
+            );
+            break;
+        case 'Support':
+            await vscode.env.openExternal(
+                vscode.Uri.parse('https://www.buymeacoffee.com/jhhtaylor')
+            );
+            break;
+    }
 }
 
 export function deactivate() {

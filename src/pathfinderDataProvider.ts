@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { CodePath, PathStep } from './models/CodePath';
 
 export class PathfinderDataProvider implements vscode.TreeDataProvider<CodePath | PathStep>, vscode.TreeDragAndDropController<CodePath | PathStep> {
@@ -36,6 +37,15 @@ export class PathfinderDataProvider implements vscode.TreeDataProvider<CodePath 
             // PathStep has no children
             return Promise.resolve([]);
         }
+    }
+
+    getParent(element: CodePath | PathStep): CodePath | undefined {
+        if (element instanceof PathStep) {
+            // Find the parent CodePath for this step
+            return this.codePaths.find(path => path.id === element.pathId);
+        }
+        // CodePath elements have no parent (they're at root level)
+        return undefined;
     }
 
     getCodePaths(): CodePath[] {
@@ -182,6 +192,149 @@ export class PathfinderDataProvider implements vscode.TreeDataProvider<CodePath 
         }
 
         return path.steps[currentIndex - 1];
+    }
+
+    private getImportExportDirectory(): string {
+        const configuredPath = vscode.workspace
+            .getConfiguration('pathfinder')
+            .get<string>('importExportDirectory', '')
+            .trim();
+
+        if (configuredPath === '') {
+            // No configuration - use workspace root or home directory
+            return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ||
+                require('os').homedir();
+        }
+
+        // Check if path is absolute
+        if (path.isAbsolute(configuredPath)) {
+            return configuredPath;
+        }
+
+        // Relative path - resolve relative to workspace root
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (workspaceRoot) {
+            return path.resolve(workspaceRoot, configuredPath);
+        }
+
+        // No workspace - treat as absolute from home directory
+        return path.resolve(require('os').homedir(), configuredPath);
+    }
+
+    async exportCodePathsToFile(): Promise<void> {
+        const defaultPath = this.getImportExportDirectory();
+
+        const uri = await vscode.window.showSaveDialog({
+            defaultUri: vscode.Uri.file(
+                path.join(defaultPath, 'pathfinder-export.json')
+            ),
+            filters: { jsonFiles: ['json'] },
+            saveLabel: 'Export Code Paths',
+        });
+
+        if (!uri) {
+            return;
+        }
+
+        const serialized = this.codePaths.map(path => ({
+            label: path.label,
+            id: path.id,
+            creationTime: path.creationTime.toISOString(),
+            colorName: path.colorName,
+            steps: path.steps.map(step => ({
+                filePath: step.resourceUri?.fsPath,
+                lineNumber: step.lineNumber,
+                columnNumber: step.columnNumber,
+                codeSnippet: step.codeSnippet,
+                stepNumber: step.stepNumber
+            }))
+        }));
+
+        const content = JSON.stringify(serialized, null, 2);
+
+        await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf8'));
+        vscode.window.showInformationMessage('Code Paths exported successfully.');
+    }
+
+    async importCodePathsFromFile(): Promise<void> {
+        const defaultPath = this.getImportExportDirectory();
+
+        const [uri] =
+            (await vscode.window.showOpenDialog({
+                canSelectMany: false,
+                filters: { jsonFiles: ['json'] },
+                openLabel: 'Import Code Paths',
+                defaultUri: vscode.Uri.file(defaultPath),
+            })) || [];
+
+        if (!uri) {
+            return;
+        }
+
+        const contentBytes = await vscode.workspace.fs.readFile(uri);
+        const content = contentBytes.toString();
+
+        try {
+            const importedPaths: any[] = JSON.parse(content);
+
+            // Validate structure
+            const isValid = Array.isArray(importedPaths) && importedPaths.every(pathData => {
+                return (
+                    typeof pathData.label === 'string' &&
+                    typeof pathData.id === 'string' &&
+                    typeof pathData.creationTime === 'string' &&
+                    typeof pathData.colorName === 'string' &&
+                    Array.isArray(pathData.steps) &&
+                    pathData.steps.every((step: any) =>
+                        typeof step.filePath === 'string' &&
+                        typeof step.lineNumber === 'number' &&
+                        typeof step.stepNumber === 'number'
+                    )
+                );
+            });
+
+            if (!isValid) {
+                vscode.window.showErrorMessage(
+                    'Invalid JSON structure. Import aborted.'
+                );
+                return;
+            }
+
+            // Import paths
+            for (const pathData of importedPaths) {
+                const newPath = new CodePath(
+                    pathData.label,
+                    pathData.id,
+                    new Date(pathData.creationTime),
+                    pathData.colorName
+                );
+
+                if (pathData.steps) {
+                    pathData.steps.forEach((stepData: any) => {
+                        if (stepData.filePath) {
+                            newPath.addStep(
+                                stepData.filePath,
+                                stepData.lineNumber,
+                                stepData.columnNumber || 0,
+                                stepData.codeSnippet
+                            );
+                        }
+                    });
+                }
+
+                this.codePaths.push(newPath);
+            }
+
+            this.saveCodePaths();
+            this.refresh();
+            vscode.window.showInformationMessage(
+                `Imported ${importedPaths.length} Code Path${importedPaths.length === 1 ? '' : 's'} successfully.`
+            );
+        } catch (error) {
+            vscode.window.showErrorMessage(
+                'Cannot import Code Paths. Invalid JSON file.'
+            );
+        }
     }
 
     // Drag and Drop implementation
