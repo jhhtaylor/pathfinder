@@ -10,6 +10,8 @@ Track and navigate through code logic flows by marking lines of code.
 
 <a href="https://www.buymeacoffee.com/jhhtaylor" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" width="217" height="60"></a>
 
+Love this extension? You can support its development with a small donation - completely optional! Your support helps me keep creating and improving tools like this.
+
 ## Features
 
 - **Create Code Paths**: Organize related code locations into named paths

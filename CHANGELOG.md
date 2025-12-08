@@ -2,6 +2,12 @@
 
 All notable changes to the Pathfinder extension will be documented in this file.
 
+## [0.2.3] - 2025-12-08
+
+### Added
+- Sponsor link in package.json and marketplace page
+- Support message in README.md
+
 ## [0.1.3] - 2025-11-21
 
 ### Added

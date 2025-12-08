@@ -10,13 +10,16 @@
     "type": "git",
     "url": "https://github.com/jhhtaylor/pathfinder"
   },
+  "sponsor": {
+    "url": "https://www.buymeacoffee.com/jhhtaylor"
+  },
   "description": "Track and navigate through code logic flows by marking lines of code",
   "icon": "media/pathfinder.png",
   "galleryBanner": {
     "color": "#FF914D",
     "theme": "dark"
   },
-  "version": "0.1.3",
+  "version": "0.2.3",
   "engines": {
     "vscode": "^1.99.0"
   },
