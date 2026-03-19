@@ -243,6 +243,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('pathfinder.renamePath', renamePath),
         vscode.commands.registerCommand('pathfinder.navigateToStep', navigateToStep),
         vscode.commands.registerCommand('pathfinder.removeStep', removeStep),
+        vscode.commands.registerCommand('pathfinder.renameStep', renameStep),
         vscode.commands.registerCommand('pathfinder.nextStep', nextStep),
         vscode.commands.registerCommand('pathfinder.previousStep', previousStep),
         vscode.commands.registerCommand('pathfinder.playPath', playPath),
@@ -463,6 +464,26 @@ function highlightLine(editor: vscode.TextEditor, lineNumber: number) {
     setTimeout(() => {
         editor.setDecorations(currentStepDecorationType, []);
     }, 2000);
+}
+
+async function renameStep(item: PathStep) {
+    if (!item.pathId || item.stepNumber === undefined) {
+        return;
+    }
+
+    const currentNote = item.customLabel ?? '';
+
+    const newNote = await vscode.window.showInputBox({
+        prompt: 'Add a note to this step — appended after the filename (leave empty to clear)',
+        value: currentNote,
+        valueSelection: [0, currentNote.length]
+    });
+
+    if (newNote === undefined) {
+        return; // cancelled
+    }
+
+    treeDataProvider.renameStep(item.pathId, item.stepNumber, newNote.trim() || undefined);
 }
 
 async function removeStep(item: PathStep) {

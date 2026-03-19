@@ -2,6 +2,12 @@
 
 All notable changes to the Pathfinder extension will be documented in this file.
 
+## [0.2.5] - 2026-03-19
+
+### Added
+
+- **Step labels**: right-click (or click the pencil icon on) any step to add a note that appends to its auto-generated label — e.g. `Step 1: extension.ts — validate input`. Leave the note empty to reset to the default. Thanks @Chikowitz for the suggestion!
+
 ## [0.2.4] - 2026-03-19
 
 ### Improved

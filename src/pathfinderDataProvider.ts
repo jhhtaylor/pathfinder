@@ -113,6 +113,17 @@ export class PathfinderDataProvider implements vscode.TreeDataProvider<CodePath 
         }
     }
 
+    renameStep(pathId: string, stepNumber: number, customLabel: string | undefined) {
+        const codePath = this.getCodePath(pathId);
+        if (!codePath) { return; }
+        const step = codePath.steps.find(s => s.stepNumber === stepNumber);
+        if (!step) { return; }
+        step.customLabel = customLabel || undefined;
+        step.label = CodePath.stepDisplayLabel(stepNumber, step.resourceUri?.fsPath || '', step.customLabel);
+        this.saveCodePaths();
+        this.refresh();
+    }
+
     private saveCodePaths() {
         const serialized = this.codePaths.map(path => ({
             label: path.label,
@@ -124,7 +135,8 @@ export class PathfinderDataProvider implements vscode.TreeDataProvider<CodePath 
                 lineNumber: step.lineNumber,
                 columnNumber: step.columnNumber,
                 codeSnippet: step.codeSnippet,
-                stepNumber: step.stepNumber
+                stepNumber: step.stepNumber,
+                customLabel: step.customLabel
             }))
         }));
 
@@ -148,7 +160,8 @@ export class PathfinderDataProvider implements vscode.TreeDataProvider<CodePath 
                             stepData.filePath,
                             stepData.lineNumber,
                             stepData.columnNumber || 0,
-                            stepData.codeSnippet
+                            stepData.codeSnippet,
+                            stepData.customLabel
                         );
                     }
                 });
@@ -246,7 +259,8 @@ export class PathfinderDataProvider implements vscode.TreeDataProvider<CodePath 
                 lineNumber: step.lineNumber,
                 columnNumber: step.columnNumber,
                 codeSnippet: step.codeSnippet,
-                stepNumber: step.stepNumber
+                stepNumber: step.stepNumber,
+                customLabel: step.customLabel
             }))
         }));
 
@@ -316,7 +330,8 @@ export class PathfinderDataProvider implements vscode.TreeDataProvider<CodePath 
                                 stepData.filePath,
                                 stepData.lineNumber,
                                 stepData.columnNumber || 0,
-                                stepData.codeSnippet
+                                stepData.codeSnippet,
+                                stepData.customLabel
                             );
                         }
                     });
@@ -432,8 +447,7 @@ export class PathfinderDataProvider implements vscode.TreeDataProvider<CodePath 
         sourcePath.steps.forEach((step, index) => {
             const newStepNumber = index + 1;
             step.stepNumber = newStepNumber;
-            const fileName = step.resourceUri?.fsPath ? step.resourceUri.fsPath.split('/').pop() : '';
-            step.label = `Step ${newStepNumber}: ${fileName}`;
+            step.label = CodePath.stepDisplayLabel(newStepNumber, step.resourceUri?.fsPath || '', step.customLabel);
             step.id = `${sourcePath.id}-step-${newStepNumber}`;
         });
 

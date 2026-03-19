@@ -19,7 +19,7 @@
     "color": "#FF914D",
     "theme": "dark"
   },
-  "version": "0.2.4",
+  "version": "0.2.5",
   "engines": {
     "vscode": "^1.99.0"
   },
@@ -74,6 +74,12 @@
         "category": "Pathfinder",
         "title": "Remove Step",
         "icon": "$(trash)"
+      },
+      {
+        "command": "pathfinder.renameStep",
+        "category": "Pathfinder",
+        "title": "Rename Step...",
+        "icon": "$(pencil)"
       },
       {
         "command": "pathfinder.nextStep",
@@ -285,9 +291,19 @@
           "group": "inline@0"
         },
         {
-          "command": "pathfinder.removeStep",
+          "command": "pathfinder.renameStep",
           "when": "view == pathfinder && viewItem == step",
           "group": "inline@1"
+        },
+        {
+          "command": "pathfinder.removeStep",
+          "when": "view == pathfinder && viewItem == step",
+          "group": "inline@2"
+        },
+        {
+          "command": "pathfinder.renameStep",
+          "when": "view == pathfinder && viewItem == step",
+          "group": "stepactions@0"
         },
         {
           "command": "pathfinder.callHierarchy.navigateToNode",
@@ -324,6 +340,10 @@
         },
         {
           "command": "pathfinder.removeStep",
+          "when": "false"
+        },
+        {
+          "command": "pathfinder.renameStep",
           "when": "false"
         },
         {

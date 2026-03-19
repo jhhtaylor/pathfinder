@@ -40,20 +40,26 @@ export class CodePath extends vscode.TreeItem {
         this.description = stepCount === 1 ? '1 step' : `${stepCount} steps`;
     }
 
+    static stepDisplayLabel(stepNumber: number, filePath: string, customLabel?: string): string {
+        const base = `Step ${stepNumber}: ${path.basename(filePath)}`;
+        return customLabel ? `${base} — ${customLabel}` : base;
+    }
+
     createPathStep(
         filePath: string,
         lineNumber: number,
         columnNumber: number = 0,
-        codeSnippet?: string
+        codeSnippet?: string,
+        customLabel?: string
     ): PathStep {
-        const baseName = path.basename(filePath);
         const relativePath = this.getRelativePath(filePath);
         const stepNumber = this.steps.length + 1;
 
         const item = new PathStep(
-            `Step ${stepNumber}: ${baseName}`,
+            CodePath.stepDisplayLabel(stepNumber, filePath, customLabel),
             vscode.TreeItemCollapsibleState.None
         );
+        item.customLabel = customLabel;
 
         item.resourceUri = vscode.Uri.file(filePath);
         item.lineNumber = lineNumber;
@@ -101,13 +107,14 @@ export class CodePath extends vscode.TreeItem {
         filePath: string,
         lineNumber: number,
         columnNumber: number = 0,
-        codeSnippet?: string
+        codeSnippet?: string,
+        customLabel?: string
     ) {
         if (!filePath) {
             vscode.window.showErrorMessage('Cannot interpret file path.');
             return;
         }
-        this.steps.push(this.createPathStep(filePath, lineNumber, columnNumber, codeSnippet));
+        this.steps.push(this.createPathStep(filePath, lineNumber, columnNumber, codeSnippet, customLabel));
         this.updateDescription();
     }
 
@@ -124,7 +131,7 @@ export class CodePath extends vscode.TreeItem {
         this.steps.forEach((step, index) => {
             const newStepNumber = index + 1;
             step.stepNumber = newStepNumber;
-            step.label = `Step ${newStepNumber}: ${path.basename(step.resourceUri?.fsPath || '')}`;
+            step.label = CodePath.stepDisplayLabel(newStepNumber, step.resourceUri?.fsPath || '', step.customLabel);
             step.id = `${this.id}-step-${newStepNumber}`;
         });
     }
@@ -136,4 +143,5 @@ export class PathStep extends vscode.TreeItem {
     columnNumber?: number;
     codeSnippet?: string;
     stepNumber?: number;
+    customLabel?: string;
 }

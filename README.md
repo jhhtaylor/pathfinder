@@ -68,6 +68,7 @@ Click the play icon (▶) next to a code path in the sidebar to automatically wa
 - **Rename**: Click the pencil icon next to a code path
 - **Delete**: Click the trash icon next to a code path
 - **Remove Step**: Click the trash icon next to a specific step
+- **Label a Step**: Click the pencil icon next to a step (or right-click → Rename Step...) to append a note to its label, e.g. `Step 1: handler.ts — validate input`. Leave empty to clear.
 
 ## Commands
 
