@@ -14,6 +14,7 @@ Love this extension? You can support its development with a small donation - com
 
 ## Features
 
+- **Call Hierarchy View**: Automatically visualises all methods in the active file and their outgoing calls, filtered to workspace code only
 - **Create Code Paths**: Organize related code locations into named paths
 - **Add Code Locations**: Right-click on any line to add it to a code path
 - **Navigate Through Paths**: Jump between steps in your code path
@@ -21,6 +22,16 @@ Love this extension? You can support its development with a small donation - com
 - **Persistent Storage**: Your code paths are saved per workspace
 
 ## Usage
+
+### Call Hierarchy View
+
+The Call Hierarchy panel appears at the top of the Pathfinder sidebar and automatically refreshes when you switch files. It shows every method in the active file along with the workspace methods each one calls, up to 3 levels deep by default.
+
+- Click any node to navigate to that method
+- Use the depth toggle buttons in the panel toolbar to switch between 3 levels and all levels
+- Pressing back after navigating to a child method returns you to the parent method in the original file
+- Recursive calls are shown as non-expandable leaf nodes labelled `methodName (recursive)`
+- Right-click any node to go to its definition or add it to a code path
 
 ### Creating a Code Path
 

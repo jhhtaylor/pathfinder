@@ -2,6 +2,15 @@
 
 All notable changes to the Pathfinder extension will be documented in this file.
 
+## [0.2.4] - 2026-03-19
+
+### Improved
+
+- **Call Hierarchy navigation**: clicking a child node now creates a clean back-navigation history entry at the root method, so pressing back always returns to the parent method in the original file rather than an arbitrary cursor position
+  - Navigating to a child method first records the root ancestor's position, making single back-press reliable across any depth of call chain
+  - Returning to the original file automatically highlights the method at the current cursor position in the Call Hierarchy panel
+  - Recursive and mutually-recursive calls are detected and shown as non-expandable leaf nodes labelled `methodName (recursive)`, preventing infinite tree expansion
+
 ## [0.2.3] - 2025-12-08
 
 ### Added

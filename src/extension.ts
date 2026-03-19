@@ -1,10 +1,14 @@
 import * as vscode from 'vscode';
 import { PathfinderDataProvider } from './pathfinderDataProvider';
 import { CodePath, PathStep } from './models/CodePath';
+import { CallHierarchyProvider, isInWorkspace } from './callHierarchyProvider';
+import { CallNode, CallDepth } from './models/CallNode';
 
 let treeDataProvider: PathfinderDataProvider;
 let currentStepDecorationType: vscode.TextEditorDecorationType;
 let collapsedPaths: Set<string>;
+let callHierarchyProvider: CallHierarchyProvider;
+let callHierarchyView: vscode.TreeView<CallNode>;
 
 // Play state management
 let isPlaying = false;
@@ -61,6 +65,175 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.executeCommand('setContext', 'pathfinder:isPlaying', false);
     vscode.commands.executeCommand('setContext', 'pathfinder:isPaused', false);
     updateCollapsedContext();
+
+    // ── Call Hierarchy view ──────────────────────────────────────────────────
+    callHierarchyProvider = new CallHierarchyProvider();
+
+    callHierarchyView = vscode.window.createTreeView('pathfinderCallHierarchy', {
+        treeDataProvider: callHierarchyProvider,
+        showCollapseAll: true
+    });
+
+    const updateCallDepthContext = (depth: CallDepth) => {
+        const label = depth === 3 ? '3 Levels' : 'All Levels';
+        callHierarchyView.description = label;
+        vscode.commands.executeCommand('setContext', 'pathfinder:callDepth', depth === 100 ? 'all' : String(depth));
+    };
+    updateCallDepthContext(3);
+
+    // When the user returns to the base file, reveal the node at the cursor position.
+    context.subscriptions.push(
+        vscode.window.onDidChangeActiveTextEditor(async (editor) => {
+            if (!editor) { return; }
+            const baseUri = callHierarchyProvider.getBaseUri();
+            if (!baseUri || editor.document.uri.toString() !== baseUri.toString()) { return; }
+            // Wait for the debounced tree rebuild (400 ms) to finish before revealing.
+            await new Promise(resolve => setTimeout(resolve, 500));
+            const node = callHierarchyProvider.getNodeAtPosition(editor.selection.active);
+            if (!node) { return; }
+            try {
+                await callHierarchyView.reveal(node, { select: true, focus: false, expand: false });
+            } catch { /* tree may have been rebuilt again */ }
+        })
+    );
+
+    context.subscriptions.push(
+        callHierarchyView,
+        callHierarchyProvider,
+        vscode.commands.registerCommand('pathfinder.callHierarchy.setDepth3', () => {
+            callHierarchyProvider.setDepth(3);
+            updateCallDepthContext(3);
+        }),
+        vscode.commands.registerCommand('pathfinder.callHierarchy.setDepthAll', () => {
+            callHierarchyProvider.setDepth(100);
+            updateCallDepthContext(100);
+        }),
+        vscode.commands.registerCommand('pathfinder.callHierarchy.refresh', () => {
+            callHierarchyProvider.refresh();
+        }),
+        vscode.commands.registerCommand('pathfinder.callHierarchy.navigateToNode',
+            async (node: CallNode) => {
+                // Suppress the active-editor change that navigation will trigger
+                // so the call hierarchy tree stays in its current expanded state.
+                callHierarchyProvider.suppressNextRefresh();
+
+                // For non-root nodes, navigate to the root ancestor first so that
+                // pressing "back" always returns to the parent method in the base file,
+                // not wherever the cursor happened to be.
+                if (!node.isRoot) {
+                    let root: CallNode = node;
+                    while (root.parent) { root = root.parent; }
+                    await navigateToCallNode(root.callItem);
+                }
+
+                await navigateToCallNode(node.callItem);
+                // Re-select the node in the panel so the user can see where they came from.
+                try {
+                    await callHierarchyView.reveal(node, { select: true, focus: false, expand: false });
+                } catch { /* node may be out of tree if a manual refresh happened */ }
+            }
+        ),
+        vscode.commands.registerCommand('pathfinder.callHierarchy.goToDefinition',
+            (node: CallNode) => navigateToCallNode(node.callItem)
+        ),
+        vscode.commands.registerCommand('pathfinder.callHierarchy.addToCodePath',
+            (node: CallNode) => addCallNodeToCodePath(node)
+        )
+    );
+    // Debug dump — diagnostic only, listed last in command palette
+    const debugChannel = vscode.window.createOutputChannel('Pathfinder Debug');
+    context.subscriptions.push(debugChannel);
+    context.subscriptions.push(
+        vscode.commands.registerCommand('pathfinder.callHierarchy.debugDump', async () => {
+                debugChannel.clear();
+                debugChannel.show(true); // show but don't steal focus
+
+                const editor = vscode.window.activeTextEditor;
+                debugChannel.appendLine('=== Pathfinder Call Hierarchy Debug Dump ===');
+                debugChannel.appendLine(`Depth: ${callHierarchyProvider.getDepth()}`);
+                debugChannel.appendLine('');
+
+                const folders = vscode.workspace.workspaceFolders;
+                debugChannel.appendLine('Workspace folders:');
+                if (!folders || folders.length === 0) {
+                    debugChannel.appendLine('  (none — external filtering disabled)');
+                } else {
+                    for (const f of folders) {
+                        debugChannel.appendLine(`  ${f.uri.fsPath}`);
+                    }
+                }
+                debugChannel.appendLine('');
+
+                if (!editor) {
+                    debugChannel.appendLine('No active editor.');
+                    return;
+                }
+
+                debugChannel.appendLine(`Active file: ${editor.document.uri.fsPath}`);
+                debugChannel.appendLine('');
+
+                let symbols: vscode.DocumentSymbol[] | undefined;
+                try {
+                    symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+                        'vscode.executeDocumentSymbolProvider',
+                        editor.document.uri
+                    );
+                } catch (e) {
+                    debugChannel.appendLine(`Error fetching symbols: ${e}`);
+                    return;
+                }
+
+                if (!symbols || symbols.length === 0) {
+                    debugChannel.appendLine('No document symbols returned (is a language server active?)');
+                    return;
+                }
+
+                const excludeExternal = vscode.workspace.getConfiguration('pathfinder')
+                    .get<boolean>('callHierarchy.excludeExternalPackages', true);
+                debugChannel.appendLine(`excludeExternalPackages: ${excludeExternal}`);
+                debugChannel.appendLine('');
+
+                const methods = debugExtractMethods(symbols);
+                methods.sort((a, b) => a.range.start.line - b.range.start.line);
+                debugChannel.appendLine(`Methods found: ${methods.length}`);
+                debugChannel.appendLine('');
+
+                for (const symbol of methods) {
+                    debugChannel.appendLine(`▶ ${symbol.name}  (line ${symbol.range.start.line + 1})`);
+                    try {
+                        const items = await vscode.commands.executeCommand<vscode.CallHierarchyItem[]>(
+                            'vscode.prepareCallHierarchy',
+                            editor.document.uri,
+                            symbol.selectionRange.start
+                        );
+                        if (!items || items.length === 0) {
+                            debugChannel.appendLine('    (prepareCallHierarchy returned nothing)');
+                            continue;
+                        }
+
+                        const outgoing = await vscode.commands.executeCommand<vscode.CallHierarchyOutgoingCall[]>(
+                            'vscode.provideOutgoingCalls',
+                            items[0]
+                        );
+                        if (!outgoing || outgoing.length === 0) {
+                            debugChannel.appendLine('    (no outgoing calls)');
+                        } else {
+                            for (const call of outgoing) {
+                                const inWs = isInWorkspace(call.to.uri);
+                                const shown = !excludeExternal || inWs;
+                                const tag = shown ? '✓ shown   ' : '✗ filtered';
+                                const rel = vscode.workspace.asRelativePath(call.to.uri);
+                                debugChannel.appendLine(`    [${tag}] ${call.to.name}  →  ${rel}:${call.to.selectionRange.start.line + 1}`);
+                            }
+                        }
+                    } catch (e) {
+                        debugChannel.appendLine(`    (error: ${e})`);
+                    }
+                    debugChannel.appendLine('');
+                }
+            })
+    );
+    // ────────────────────────────────────────────────────────────────────────
 
     // Register commands
     context.subscriptions.push(
@@ -558,6 +731,89 @@ async function showMoreOptions() {
             );
             break;
     }
+}
+
+async function navigateToCallNode(item: vscode.CallHierarchyItem) {
+    const document = await vscode.workspace.openTextDocument(item.uri);
+    const position = item.selectionRange.start;
+    const selection = new vscode.Selection(position, position);
+    // Pass selection to showTextDocument so the open + cursor move are a single
+    // navigation history entry — without this, pressing back lands at the top
+    // of the file instead of going directly back to the previous file.
+    const editor = await vscode.window.showTextDocument(document, { selection });
+    editor.revealRange(item.selectionRange, vscode.TextEditorRevealType.InCenter);
+    highlightLine(editor, position.line);
+}
+
+async function addCallNodeToCodePath(node: CallNode) {
+    const item = node.callItem;
+    const filePath = item.uri.fsPath;
+    const lineNumber = item.selectionRange.start.line;
+    const columnNumber = item.selectionRange.start.character;
+    const lineText = item.name;
+
+    const codePaths = treeDataProvider.getCodePaths();
+
+    if (codePaths.length === 0) {
+        const createNew = await vscode.window.showQuickPick(['Create New Code Path'], {
+            placeHolder: 'No code paths found. Create a new one?'
+        });
+        if (!createNew) { return; }
+
+        const finalName = await resolveCodePathName();
+        if (finalName === undefined) { return; }
+
+        const newPath = treeDataProvider.createCodePath(finalName);
+        treeDataProvider.addStepToPath(newPath.id, filePath, lineNumber, columnNumber, lineText);
+        vscode.window.showInformationMessage(`Added "${item.name}" to "${finalName}"`);
+        return;
+    }
+
+    interface PathItem extends vscode.QuickPickItem { pathId: string; }
+    const items: PathItem[] = [
+        ...codePaths.map(p => ({ label: p.label as string, description: '', pathId: p.id })),
+        { label: '$(plus) Create New Code Path', description: '', pathId: '__new__' }
+    ];
+
+    const selected = await vscode.window.showQuickPick<PathItem>(items, {
+        placeHolder: `Add "${item.name}" to which code path?`
+    });
+    if (!selected) { return; }
+
+    if (selected.pathId === '__new__') {
+        const finalName = await resolveCodePathName();
+        if (finalName === undefined) { return; }
+        const newPath = treeDataProvider.createCodePath(finalName);
+        treeDataProvider.addStepToPath(newPath.id, filePath, lineNumber, columnNumber, lineText);
+        vscode.window.showInformationMessage(`Added "${item.name}" to "${finalName}"`);
+    } else {
+        treeDataProvider.addStepToPath(selected.pathId, filePath, lineNumber, columnNumber, lineText);
+        vscode.window.showInformationMessage(`Added "${item.name}" to "${selected.label}"`);
+    }
+}
+
+function debugExtractMethods(symbols: vscode.DocumentSymbol[]): vscode.DocumentSymbol[] {
+    const result: vscode.DocumentSymbol[] = [];
+    for (const s of symbols) {
+        if (s.kind === vscode.SymbolKind.Function || s.kind === vscode.SymbolKind.Method || s.kind === vscode.SymbolKind.Constructor) {
+            result.push(s);
+        }
+        if (s.children?.length) { result.push(...debugExtractMethods(s.children)); }
+    }
+    return result;
+}
+
+async function resolveCodePathName(): Promise<string | undefined> {
+    const promptForName = vscode.workspace.getConfiguration('pathfinder').get<boolean>('promptForName', false);
+    if (!promptForName) {
+        return getDefaultPathName();
+    }
+    const name = await vscode.window.showInputBox({
+        prompt: 'Enter a name for the new code path',
+        placeHolder: 'e.g., User Authentication Flow'
+    });
+    if (name === undefined) { return undefined; }
+    return name.trim() || getDefaultPathName();
 }
 
 export function deactivate() {

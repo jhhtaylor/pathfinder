@@ -19,7 +19,7 @@
     "color": "#FF914D",
     "theme": "dark"
   },
-  "version": "0.2.3",
+  "version": "0.2.4",
   "engines": {
     "vscode": "^1.99.0"
   },
@@ -140,6 +140,47 @@
         "category": "Pathfinder",
         "title": "More Options...",
         "icon": "$(ellipsis)"
+      },
+      {
+        "command": "pathfinder.callHierarchy.setDepth3",
+        "category": "Pathfinder",
+        "title": "Depth: 3 Levels",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "pathfinder.callHierarchy.setDepthAll",
+        "category": "Pathfinder",
+        "title": "Depth: All Levels",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "pathfinder.callHierarchy.refresh",
+        "category": "Pathfinder",
+        "title": "Refresh Call Hierarchy",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "pathfinder.callHierarchy.navigateToNode",
+        "category": "Pathfinder",
+        "title": "Navigate to Method",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "pathfinder.callHierarchy.goToDefinition",
+        "category": "Pathfinder",
+        "title": "Go to Definition",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "pathfinder.callHierarchy.addToCodePath",
+        "category": "Pathfinder",
+        "title": "Add to Code Path...",
+        "icon": "$(plus)"
+      },
+      {
+        "command": "pathfinder.callHierarchy.debugDump",
+        "category": "Pathfinder",
+        "title": "Call Hierarchy: Debug Dump"
       }
     ],
     "viewsContainers": {
@@ -153,6 +194,10 @@
     },
     "views": {
       "pathfinder": [
+        {
+          "id": "pathfinderCallHierarchy",
+          "name": "Call Hierarchy"
+        },
         {
           "id": "pathfinder",
           "name": "Code Paths"
@@ -180,6 +225,21 @@
           "command": "pathfinder.showMoreOptions",
           "when": "view == pathfinder",
           "group": "navigation@2"
+        },
+        {
+          "command": "pathfinder.callHierarchy.setDepth3",
+          "when": "view == pathfinderCallHierarchy",
+          "group": "navigation@0"
+        },
+        {
+          "command": "pathfinder.callHierarchy.setDepthAll",
+          "when": "view == pathfinderCallHierarchy",
+          "group": "navigation@2"
+        },
+        {
+          "command": "pathfinder.callHierarchy.refresh",
+          "when": "view == pathfinderCallHierarchy",
+          "group": "navigation@3"
         }
       ],
       "editor/context": [
@@ -228,6 +288,21 @@
           "command": "pathfinder.removeStep",
           "when": "view == pathfinder && viewItem == step",
           "group": "inline@1"
+        },
+        {
+          "command": "pathfinder.callHierarchy.navigateToNode",
+          "when": "view == pathfinderCallHierarchy && (viewItem == callNodeRoot || viewItem == callNode)",
+          "group": "inline@0"
+        },
+        {
+          "command": "pathfinder.callHierarchy.goToDefinition",
+          "when": "view == pathfinderCallHierarchy && (viewItem == callNodeRoot || viewItem == callNode)",
+          "group": "callhierarchy@0"
+        },
+        {
+          "command": "pathfinder.callHierarchy.addToCodePath",
+          "when": "view == pathfinderCallHierarchy && (viewItem == callNodeRoot || viewItem == callNode)",
+          "group": "callhierarchy@1"
         }
       ],
       "commandPalette": [
@@ -288,6 +363,30 @@
         },
         {
           "command": "pathfinder.showMoreOptions"
+        },
+        {
+          "command": "pathfinder.callHierarchy.setDepth3"
+        },
+        {
+          "command": "pathfinder.callHierarchy.setDepthAll"
+        },
+        {
+          "command": "pathfinder.callHierarchy.refresh"
+        },
+        {
+          "command": "pathfinder.callHierarchy.navigateToNode",
+          "when": "false"
+        },
+        {
+          "command": "pathfinder.callHierarchy.goToDefinition",
+          "when": "false"
+        },
+        {
+          "command": "pathfinder.callHierarchy.addToCodePath",
+          "when": "false"
+        },
+        {
+          "command": "pathfinder.callHierarchy.debugDump"
         }
       ]
     },
@@ -327,6 +426,11 @@
           "type": "boolean",
           "default": false,
           "description": "Prompt for a custom name when creating a new code path. When disabled, paths are automatically named 'Code Path 1', 'Code Path 2', etc."
+        },
+        "pathfinder.callHierarchy.excludeExternalPackages": {
+          "type": "boolean",
+          "default": true,
+          "description": "In the Call Hierarchy view, hide methods that live outside the workspace (e.g. npm packages, SDK standard library calls). Disable to show all outgoing calls including third-party code."
         }
       }
     }

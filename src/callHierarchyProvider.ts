@@ -1,0 +1,357 @@
+import * as vscode from 'vscode';
+import { CallNode, CallDepth } from './models/CallNode';
+
+export class CallHierarchyProvider implements vscode.TreeDataProvider<CallNode>, vscode.Disposable {
+    private _onDidChangeTreeData = new vscode.EventEmitter<CallNode | undefined | null | void>();
+    readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+
+    private maxDepth: CallDepth = 3;
+    private disposables: vscode.Disposable[] = [];
+    private debounceTimer: ReturnType<typeof setTimeout> | undefined;
+    private suppressNextRefreshFlag = false;
+    // Nodes whose getChildren() returned [] — rendered as leaves (no expand arrow)
+    private emptyNodes = new WeakSet<CallNode>();
+    // Cache of the last-built root nodes and the file they belong to
+    private cachedRoots: CallNode[] = [];
+    private baseUri: vscode.Uri | undefined;
+
+    constructor() {
+        this.disposables.push(
+            vscode.window.onDidChangeActiveTextEditor(() => this.debouncedRefresh()),
+            vscode.workspace.onDidSaveTextDocument(() => this.debouncedRefresh())
+        );
+    }
+
+    suppressNextRefresh(): void {
+        this.suppressNextRefreshFlag = true;
+    }
+
+    setDepth(depth: CallDepth): void {
+        this.maxDepth = depth;
+        this.emptyNodes = new WeakSet<CallNode>();
+        this._onDidChangeTreeData.fire();
+    }
+
+    getDepth(): CallDepth {
+        return this.maxDepth;
+    }
+
+    getBaseUri(): vscode.Uri | undefined {
+        return this.baseUri;
+    }
+
+    /** Find the root node whose callItem.range contains the given position. */
+    getNodeAtPosition(position: vscode.Position): CallNode | undefined {
+        return this.cachedRoots.find(node => node.callItem.range.contains(position));
+    }
+
+    refresh(): void {
+        this.emptyNodes = new WeakSet<CallNode>();
+        this._onDidChangeTreeData.fire();
+    }
+
+    private resetAndFire(): void {
+        this.emptyNodes = new WeakSet<CallNode>();
+        this._onDidChangeTreeData.fire();
+    }
+
+    getTreeItem(element: CallNode): vscode.TreeItem {
+        if (this.emptyNodes.has(element)) {
+            element.collapsibleState = vscode.TreeItemCollapsibleState.None;
+        }
+        return element;
+    }
+
+    getParent(element: CallNode): CallNode | undefined {
+        return element.parent;
+    }
+
+    async getChildren(element?: CallNode): Promise<CallNode[]> {
+        if (!element) {
+            return this.getRootNodes();
+        }
+        return this.getOutgoingCallNodes(element);
+    }
+
+    private async getRootNodes(): Promise<CallNode[]> {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            this.cachedRoots = [];
+            this.baseUri = undefined;
+            return [];
+        }
+
+        let symbols: vscode.DocumentSymbol[] | undefined;
+        try {
+            symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+                'vscode.executeDocumentSymbolProvider',
+                editor.document.uri
+            );
+        } catch {
+            return [];
+        }
+
+        if (!symbols || symbols.length === 0) {
+            return [];
+        }
+
+        const methods = extractCallableSymbols(symbols);
+        // Guarantee document order regardless of what the LSP returns
+        methods.sort((a, b) => a.range.start.line - b.range.start.line);
+
+        const nodes: CallNode[] = [];
+
+        for (const symbol of methods) {
+            try {
+                const items = await vscode.commands.executeCommand<vscode.CallHierarchyItem[]>(
+                    'vscode.prepareCallHierarchy',
+                    editor.document.uri,
+                    symbol.selectionRange.start
+                );
+                if (items && items.length > 0) {
+                    const hint = symbol.detail
+                        ? compactSignature(symbol.detail, symbol.name)
+                        : await resolveSignatureFromDocument(items[0]);
+                    nodes.push(new CallNode(items[0], 1, this.maxDepth, true, hint));
+                }
+            } catch {
+                // Language server may not support call hierarchy for this symbol
+            }
+        }
+
+        // Pre-fetch whether each root has any workspace children so we don't show
+        // an expand arrow on methods that only call external code.
+        const excludeExternal = vscode.workspace.getConfiguration('pathfinder')
+            .get<boolean>('callHierarchy.excludeExternalPackages', true);
+        await Promise.all(nodes.map(async node => {
+            if (node.collapsibleState !== vscode.TreeItemCollapsibleState.None) {
+                const hasChildren = await hasOutgoingWorkspaceCalls(node.callItem, excludeExternal);
+                if (!hasChildren) {
+                    node.collapsibleState = vscode.TreeItemCollapsibleState.None;
+                    this.emptyNodes.add(node);
+                }
+            }
+        }));
+
+        this.baseUri = editor.document.uri;
+        this.cachedRoots = nodes;
+        return nodes;
+    }
+
+    private async getOutgoingCallNodes(node: CallNode): Promise<CallNode[]> {
+        const nextDepth = node.nodeDepth + 1;
+        if (nextDepth > this.maxDepth) {
+            return [];
+        }
+
+        let outgoing: vscode.CallHierarchyOutgoingCall[] | undefined;
+        try {
+            outgoing = await vscode.commands.executeCommand<vscode.CallHierarchyOutgoingCall[]>(
+                'vscode.provideOutgoingCalls',
+                node.callItem
+            );
+        } catch {
+            return [];
+        }
+
+        if (!outgoing || outgoing.length === 0) {
+            this.markEmpty(node);
+            return [];
+        }
+
+        const excludeExternal = vscode.workspace.getConfiguration('pathfinder')
+            .get<boolean>('callHierarchy.excludeExternalPackages', true);
+
+        // Build the set of ancestor method identifiers to detect recursive cycles
+        const ancestorKeys = new Set<string>();
+        let ancestor: CallNode | undefined = node;
+        while (ancestor) {
+            ancestorKeys.add(`${ancestor.callItem.uri.toString()}::${ancestor.callItem.selectionRange.start.line}`);
+            ancestor = ancestor.parent;
+        }
+
+        const seen = new Set<string>();
+        const result: CallNode[] = [];
+
+        for (const call of outgoing) {
+            if (excludeExternal && !isInWorkspace(call.to.uri)) {
+                continue;
+            }
+            const key = `${call.to.uri.toString()}::${call.to.selectionRange.start.line}::${call.to.name}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                const hint = await resolveSignatureHint(call.to);
+                const childKey = `${call.to.uri.toString()}::${call.to.selectionRange.start.line}`;
+                const isRecursive = ancestorKeys.has(childKey);
+                const child = new CallNode(call.to, nextDepth, this.maxDepth, false, hint, isRecursive);
+                child.parent = node;
+                result.push(child);
+            }
+        }
+
+        if (result.length === 0) {
+            this.markEmpty(node);
+            return [];
+        }
+
+        // For children that could have grandchildren (i.e. not already at maxDepth),
+        // pre-fetch their outgoing calls in parallel so we can set collapsibleState = None
+        // immediately — without this the expand arrow briefly appears then vanishes on click.
+        if (nextDepth < this.maxDepth) {
+            await Promise.all(result.map(async child => {
+                // Recursive nodes are already marked as leaves; skip pre-fetch.
+                if (child.collapsibleState === vscode.TreeItemCollapsibleState.None) { return; }
+                const hasGrandchildren = await hasOutgoingWorkspaceCalls(child.callItem, excludeExternal);
+                if (!hasGrandchildren) {
+                    child.collapsibleState = vscode.TreeItemCollapsibleState.None;
+                    this.emptyNodes.add(child);
+                }
+            }));
+        }
+
+        return result;
+    }
+
+    /** Mark a node as a leaf and immediately signal VS Code to re-render it without an expand arrow. */
+    private markEmpty(node: CallNode): void {
+        if (!this.emptyNodes.has(node)) {
+            this.emptyNodes.add(node);
+            node.collapsibleState = vscode.TreeItemCollapsibleState.None;
+            this._onDidChangeTreeData.fire(node);
+        }
+    }
+
+    private debouncedRefresh(): void {
+        if (this.suppressNextRefreshFlag) {
+            this.suppressNextRefreshFlag = false;
+            return;
+        }
+        if (this.debounceTimer) {
+            clearTimeout(this.debounceTimer);
+        }
+        this.debounceTimer = setTimeout(() => this.resetAndFire(), 400);
+    }
+
+    dispose(): void {
+        this.disposables.forEach(d => d.dispose());
+        this._onDidChangeTreeData.dispose();
+        if (this.debounceTimer) {
+            clearTimeout(this.debounceTimer);
+        }
+    }
+}
+
+function extractCallableSymbols(symbols: vscode.DocumentSymbol[]): vscode.DocumentSymbol[] {
+    const result: vscode.DocumentSymbol[] = [];
+    for (const symbol of symbols) {
+        if (
+            symbol.kind === vscode.SymbolKind.Function ||
+            symbol.kind === vscode.SymbolKind.Method ||
+            symbol.kind === vscode.SymbolKind.Constructor
+        ) {
+            result.push(symbol);
+        }
+        if (symbol.children && symbol.children.length > 0) {
+            result.push(...extractCallableSymbols(symbol.children));
+        }
+    }
+    return result;
+}
+
+/** Returns true if item has at least one outgoing call that passes the workspace filter. */
+async function hasOutgoingWorkspaceCalls(item: vscode.CallHierarchyItem, excludeExternal: boolean): Promise<boolean> {
+    try {
+        const outgoing = await vscode.commands.executeCommand<vscode.CallHierarchyOutgoingCall[]>(
+            'vscode.provideOutgoingCalls',
+            item
+        );
+        if (!outgoing || outgoing.length === 0) { return false; }
+        if (!excludeExternal) { return true; }
+        return outgoing.some(call => isInWorkspace(call.to.uri));
+    } catch {
+        return false;
+    }
+}
+
+export function isInWorkspace(uri: vscode.Uri): boolean {
+    const fsPath = uri.fsPath;
+
+    // node_modules is never user code, even when inside the workspace root
+    if (fsPath.includes('/node_modules/') || fsPath.includes('\\node_modules\\')) {
+        return false;
+    }
+
+    const folders = vscode.workspace.workspaceFolders;
+    if (!folders || folders.length === 0) {
+        // No workspace open — show everything rather than hiding too much
+        return true;
+    }
+
+    return folders.some(f => fsPath.startsWith(f.uri.fsPath));
+}
+
+async function resolveSignatureHint(item: vscode.CallHierarchyItem): Promise<string | undefined> {
+    if (item.detail && item.detail.includes('(')) {
+        return compactSignature(item.detail, item.name);
+    }
+    return resolveSignatureFromDocument(item);
+}
+
+async function resolveSignatureFromDocument(item: vscode.CallHierarchyItem): Promise<string | undefined> {
+    try {
+        const doc = await vscode.workspace.openTextDocument(item.uri);
+        const startLine = item.range.start.line;
+        const endLine = Math.min(item.range.end.line, startLine + 5);
+        let text = '';
+        for (let l = startLine; l <= endLine; l++) {
+            text += doc.lineAt(l).text + ' ';
+        }
+
+        const nameIdx = text.indexOf(item.name);
+        if (nameIdx === -1) { return undefined; }
+        const parenStart = text.indexOf('(', nameIdx + item.name.length);
+        if (parenStart === -1) { return undefined; }
+
+        let depth = 0;
+        let parenEnd = -1;
+        for (let i = parenStart; i < text.length; i++) {
+            if (text[i] === '(') { depth++; }
+            else if (text[i] === ')') {
+                depth--;
+                if (depth === 0) { parenEnd = i; break; }
+            }
+        }
+        if (parenEnd === -1) { return undefined; }
+
+        const params = text.slice(parenStart + 1, parenEnd).trim();
+        if (!params) { return '()'; }
+        return `(${params.replace(/\s+/g, ' ')})`;
+    } catch {
+        return undefined;
+    }
+}
+
+function compactSignature(detail: string, methodName?: string): string {
+    let searchFrom = 0;
+    if (methodName) {
+        const nameIdx = detail.indexOf(methodName);
+        if (nameIdx !== -1) {
+            searchFrom = nameIdx + methodName.length;
+        }
+    }
+
+    const open = detail.indexOf('(', searchFrom);
+    if (open === -1) { return detail.trim(); }
+
+    let depth = 0;
+    let close = -1;
+    for (let i = open; i < detail.length; i++) {
+        if (detail[i] === '(') { depth++; }
+        else if (detail[i] === ')') {
+            depth--;
+            if (depth === 0) { close = i; break; }
+        }
+    }
+    if (close === -1) { return detail.trim(); }
+    return `(${detail.slice(open + 1, close).replace(/\s+/g, ' ').trim()})`;
+}
