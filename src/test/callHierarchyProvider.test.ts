@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { isInWorkspace } from '../callHierarchyProvider';
+import { isInWorkspace, compactSignature } from '../callHierarchyProvider';
 
 function uri(fsPath: string): vscode.Uri {
     return vscode.Uri.file(fsPath);
@@ -104,5 +104,91 @@ suite('isInWorkspace Test Suite', () => {
         // without a child segment won't match.
         const edgeUri = uri('/projects/app/node_modules');
         assert.doesNotThrow(() => isInWorkspace(edgeUri));
+    });
+});
+
+suite('compactSignature Test Suite', () => {
+
+    // ── basic extraction ──────────────────────────────────────────────────────
+
+    test('extracts simple parameter list', () => {
+        assert.strictEqual(compactSignature('myMethod(a: string, b: number)'), '(a: string, b: number)');
+    });
+
+    test('extracts empty parameter list', () => {
+        assert.strictEqual(compactSignature('myMethod()'), '()');
+    });
+
+    test('returns trimmed detail when no opening paren is found', () => {
+        assert.strictEqual(compactSignature('  noParens  '), 'noParens');
+    });
+
+    test('returns trimmed detail when parens are unbalanced (no closing paren)', () => {
+        assert.strictEqual(compactSignature('myMethod(oops'), 'myMethod(oops');
+    });
+
+    // ── methodName offset ─────────────────────────────────────────────────────
+
+    test('skips past methodName before searching for opening paren', () => {
+        // TypeScript detail: "methodName(param: Type): ReturnType"
+        assert.strictEqual(compactSignature('doWork(x: number): void', 'doWork'), '(x: number)');
+    });
+
+    test('works without a methodName hint', () => {
+        assert.strictEqual(compactSignature('doWork(x: number): void'), '(x: number)');
+    });
+
+    test('handles detail where methodName appears before the paren (class prefix)', () => {
+        // e.g. TypeScript LSP detail: "MyClass.myMethod(a: string)"
+        assert.strictEqual(compactSignature('MyClass.myMethod(a: string)', 'myMethod'), '(a: string)');
+    });
+
+    // ── nested generics ───────────────────────────────────────────────────────
+
+    test('handles nested angle brackets inside params without breaking paren balance', () => {
+        const detail = 'getItems(filter: Map<string, number>): void';
+        assert.strictEqual(compactSignature(detail, 'getItems'), '(filter: Map<string, number>)');
+    });
+
+    test('handles nested parens (e.g. default value expressions)', () => {
+        const detail = 'fn(cb: () => void): void';
+        assert.strictEqual(compactSignature(detail, 'fn'), '(cb: () => void)');
+    });
+
+    // ── whitespace normalisation ──────────────────────────────────────────────
+
+    test('collapses internal whitespace in params', () => {
+        const detail = 'fn(a:  string,   b:  number)';
+        // compactSignature replaces runs of whitespace with single space
+        const result = compactSignature(detail, 'fn');
+        assert.ok(!result.includes('  '), `Expected no double spaces, got: ${result}`);
+    });
+
+    // ── C# guard: class-name detail should NOT appear in label ────────────────
+
+    test('detail that is just a class name (no parens) returns trimmed class name', () => {
+        // C# LSP sends symbol.detail = "EmployeesController" with no parens.
+        // The fallback now passes undefined as hint, so this function result is
+        // intentionally never used for C# — but we document its behaviour here.
+        assert.strictEqual(compactSignature('EmployeesController'), 'EmployeesController');
+    });
+
+    test('fallback nodes use undefined hint so label equals method name only', () => {
+        // The 0.2.7 fix: in the language-server fallback path we pass undefined as
+        // the hint instead of compactSignature(symbol.detail, symbol.name).
+        // Verify CallNode honours that: label must equal callItem.name with no extra text.
+        const { CallNode } = require('../models/CallNode');
+        const pos = new vscode.Position(0, 0);
+        const range = new vscode.Range(pos, pos);
+        const item = new vscode.CallHierarchyItem(
+            vscode.SymbolKind.Method,
+            'GetEmployees',
+            'EmployeesController',   // C# detail — class name, not a param list
+            vscode.Uri.file('/project/Controllers/EmployeesController.cs'),
+            range, range
+        );
+        const { maxDepth } = { maxDepth: 3 };
+        const node = new CallNode(item, maxDepth, maxDepth, true, undefined);
+        assert.strictEqual(node.label, 'GetEmployees');
     });
 });

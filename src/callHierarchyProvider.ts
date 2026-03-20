@@ -129,9 +129,9 @@ export class CallHierarchyProvider implements vscode.TreeDataProvider<CallNode>,
         // DocumentSymbol data so the view is still useful for navigation.
         if (methods.length > 0 && nodes.length === 0) {
             for (const symbol of methods) {
-                const hint = symbol.detail ? compactSignature(symbol.detail, symbol.name) : undefined;
-                // Construct a synthetic CallHierarchyItem from the DocumentSymbol so
-                // the existing CallNode / navigate machinery works unchanged.
+                // Don't pass a hint: the symbol name from many language servers
+                // (e.g. C#) already includes the parameter list and return type,
+                // so appending detail would produce garbled labels.
                 const fallbackItem = new vscode.CallHierarchyItem(
                     symbol.kind,
                     symbol.name,
@@ -141,7 +141,7 @@ export class CallHierarchyProvider implements vscode.TreeDataProvider<CallNode>,
                     symbol.selectionRange
                 );
                 // nodeDepth === maxDepth forces collapsibleState = None (no children possible)
-                const node = new CallNode(fallbackItem, this.maxDepth, this.maxDepth, true, hint);
+                const node = new CallNode(fallbackItem, this.maxDepth, this.maxDepth, true, undefined);
                 this.emptyNodes.add(node);
                 nodes.push(node);
             }
@@ -385,7 +385,7 @@ async function resolveSignatureFromDocument(item: vscode.CallHierarchyItem): Pro
     }
 }
 
-function compactSignature(detail: string, methodName?: string): string {
+export function compactSignature(detail: string, methodName?: string): string {
     let searchFrom = 0;
     if (methodName) {
         const nameIdx = detail.indexOf(methodName);

@@ -8,6 +8,10 @@ All notable changes to the Pathfinder extension will be documented in this file.
 
 - **Call Hierarchy language compatibility**: languages whose servers do not support outgoing call hierarchy (C#, Ruby, PHP, Kotlin) now show a flat navigable method list instead of a blank view, with a message explaining the limitation. Full tree expansion works for TypeScript/JS, Go, Java, Python, and C/C++ (clangd).
 
+### Fixed
+
+- **Fallback method labels garbled for C#**: the flat-list fallback was calling `compactSignature` on `symbol.detail`, but for C# (and similar servers) `detail` contains the class name rather than a parameter list, producing labels like `GetEmployees() : Task<...>EmployeesController`. The fallback now always uses `undefined` as the hint so the label is exactly the method name.
+
 ## [0.2.6] - 2026-03-20
 
 ### Fixed

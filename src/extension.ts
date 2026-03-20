@@ -81,6 +81,13 @@ export function activate(context: vscode.ExtensionContext) {
     };
     updateCallDepthContext(3);
 
+    // Propagate language-server capability messages into the view title area.
+    context.subscriptions.push(
+        callHierarchyProvider.onDidChangeMessage.event(msg => {
+            callHierarchyView.message = msg;
+        })
+    );
+
     // When the user returns to the base file, reveal the node at the cursor position.
     context.subscriptions.push(
         vscode.window.onDidChangeActiveTextEditor(async (editor) => {
