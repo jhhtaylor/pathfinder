@@ -2,7 +2,7 @@
 
 All notable changes to the Pathfinder extension will be documented in this file.
 
-## [0.2.7] - 2026-03-20
+## [0.2.7-0.2.8] - 2026-03-20
 
 ### Improved
 
