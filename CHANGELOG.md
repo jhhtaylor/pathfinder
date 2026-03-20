@@ -2,6 +2,12 @@
 
 All notable changes to the Pathfinder extension will be documented in this file.
 
+## [0.2.7] - 2026-03-20
+
+### Improved
+
+- **Call Hierarchy language compatibility**: languages whose servers do not support outgoing call hierarchy (C#, Ruby, PHP, Kotlin) now show a flat navigable method list instead of a blank view, with a message explaining the limitation. Full tree expansion works for TypeScript/JS, Go, Java, Python, and C/C++ (clangd).
+
 ## [0.2.6] - 2026-03-20
 
 ### Fixed

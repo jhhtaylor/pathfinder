@@ -89,6 +89,25 @@ This extension stores code paths in your workspace state.
 - **Documentation**: Create guided tours of your codebase
 - **Onboarding**: Help new team members understand code flows
 
+## Call Hierarchy Language Compatibility
+
+The Call Hierarchy view depends on the installed language server extension advertising outgoing call hierarchy support. Languages tested:
+
+| Language | Extension required | Call Hierarchy |
+|---|---|---|
+| TypeScript / JavaScript | Built-in | ✅ Full tree |
+| Go | gopls | ✅ Full tree |
+| Java | Language Support for Java (Red Hat) | ✅ Full tree |
+| Python | Pylance | ✅ Full tree |
+| C / C++ | clangd | ✅ Full tree |
+| Rust | rust-analyzer | ⚠️ Works, some known bugs |
+| C# | OmniSharp / C# Dev Kit | 🔄 Methods listed for navigation only |
+| Ruby | Solargraph / Ruby LSP | 🔄 Methods listed for navigation only |
+| PHP | Intelephense | 🔄 Methods listed for navigation only |
+| Kotlin | Kotlin Language Server | 🔄 Methods listed for navigation only |
+
+For languages in the 🔄 row, the panel shows all methods in the file as clickable navigation items with a note explaining that outgoing call hierarchy is unsupported. The Code Paths feature works for all languages regardless.
+
 ## Requirements
 
 VS Code version 1.99.0 or higher

@@ -14,6 +14,10 @@ export class CallHierarchyProvider implements vscode.TreeDataProvider<CallNode>,
     // Cache of the last-built root nodes and the file they belong to
     private cachedRoots: CallNode[] = [];
     private baseUri: vscode.Uri | undefined;
+    // Message to surface in the tree view (e.g. unsupported language server)
+    private _statusMessage: string | undefined;
+
+    readonly onDidChangeMessage = new vscode.EventEmitter<string | undefined>();
 
     constructor() {
         this.disposables.push(
@@ -92,6 +96,7 @@ export class CallHierarchyProvider implements vscode.TreeDataProvider<CallNode>,
         }
 
         if (!symbols || symbols.length === 0) {
+            this.setMessage(undefined);
             return [];
         }
 
@@ -118,6 +123,37 @@ export class CallHierarchyProvider implements vscode.TreeDataProvider<CallNode>,
                 // Language server may not support call hierarchy for this symbol
             }
         }
+
+        // If the language server found methods but couldn't prepare call hierarchy
+        // for any of them, fall back to a flat navigable list built from the
+        // DocumentSymbol data so the view is still useful for navigation.
+        if (methods.length > 0 && nodes.length === 0) {
+            for (const symbol of methods) {
+                const hint = symbol.detail ? compactSignature(symbol.detail, symbol.name) : undefined;
+                // Construct a synthetic CallHierarchyItem from the DocumentSymbol so
+                // the existing CallNode / navigate machinery works unchanged.
+                const fallbackItem = new vscode.CallHierarchyItem(
+                    symbol.kind,
+                    symbol.name,
+                    symbol.detail || '',
+                    editor.document.uri,
+                    symbol.range,
+                    symbol.selectionRange
+                );
+                // nodeDepth === maxDepth forces collapsibleState = None (no children possible)
+                const node = new CallNode(fallbackItem, this.maxDepth, this.maxDepth, true, hint);
+                this.emptyNodes.add(node);
+                nodes.push(node);
+            }
+            this.setMessage(
+                'Outgoing call hierarchy is not supported for this language. ' +
+                'Methods are listed for navigation only.'
+            );
+            this.baseUri = editor.document.uri;
+            this.cachedRoots = nodes;
+            return nodes;
+        }
+        this.setMessage(undefined);
 
         // Pre-fetch whether each root has any workspace children so we don't show
         // an expand arrow on methods that only call external code.
@@ -232,9 +268,21 @@ export class CallHierarchyProvider implements vscode.TreeDataProvider<CallNode>,
         this.debounceTimer = setTimeout(() => this.resetAndFire(), 400);
     }
 
+    private setMessage(msg: string | undefined): void {
+        if (this._statusMessage !== msg) {
+            this._statusMessage = msg;
+            this.onDidChangeMessage.fire(msg);
+        }
+    }
+
+    getStatusMessage(): string | undefined {
+        return this._statusMessage;
+    }
+
     dispose(): void {
         this.disposables.forEach(d => d.dispose());
         this._onDidChangeTreeData.dispose();
+        this.onDidChangeMessage.dispose();
         if (this.debounceTimer) {
             clearTimeout(this.debounceTimer);
         }
