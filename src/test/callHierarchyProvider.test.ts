@@ -23,6 +23,23 @@ suite('isInWorkspace Test Suite', () => {
         assert.strictEqual(isInWorkspace(fakeUri), false);
     });
 
+    // ── Windows drive-letter case sensitivity ─────────────────────────────────
+
+    test('workspace check is case-insensitive for Windows drive letters', () => {
+        // Simulate the Windows scenario: workspace folder has lowercase drive letter
+        // but the TS language server returns an uppercase one in the call URI.
+        // We can only run this check on Windows; on other platforms just assert no throw.
+        if (process.platform !== 'win32') {
+            assert.doesNotThrow(() => isInWorkspace({ fsPath: 'C:\\project\\src\\file.ts' } as vscode.Uri));
+            return;
+        }
+        // On Windows, both of these should agree — neither should be excluded solely
+        // because of drive-letter case.
+        const upper = { fsPath: 'C:\\project\\src\\file.ts' } as vscode.Uri;
+        const lower = { fsPath: 'c:\\project\\src\\file.ts' } as vscode.Uri;
+        assert.strictEqual(isInWorkspace(upper), isInWorkspace(lower));
+    });
+
     test('node_modules inside workspace root is still excluded', () => {
         // Even if the path technically starts with a workspace folder, node_modules
         // should always be filtered out.

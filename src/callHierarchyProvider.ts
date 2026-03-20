@@ -287,7 +287,13 @@ export function isInWorkspace(uri: vscode.Uri): boolean {
         return true;
     }
 
-    return folders.some(f => fsPath.startsWith(f.uri.fsPath));
+    // Use case-insensitive comparison on Windows: VS Code workspace folder paths
+    // consistently use lowercase drive letters (e.g. c:\project) but the TypeScript
+    // language server returns call hierarchy URIs with uppercase drive letters
+    // (e.g. C:\project\src\file.ts), so a plain startsWith check always fails there.
+    const normalize = (p: string) => process.platform === 'win32' ? p.toLowerCase() : p;
+    const normalizedPath = normalize(fsPath);
+    return folders.some(f => normalizedPath.startsWith(normalize(f.uri.fsPath)));
 }
 
 async function resolveSignatureHint(item: vscode.CallHierarchyItem): Promise<string | undefined> {

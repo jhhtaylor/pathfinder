@@ -2,6 +2,12 @@
 
 All notable changes to the Pathfinder extension will be documented in this file.
 
+## [0.2.6] - 2026-03-20
+
+### Fixed
+
+- **Windows: Call Hierarchy view empty** — workspace path comparison was case-sensitive, causing the TypeScript language server's uppercase drive-letter URIs (`C:\...`) to never match VS Code's lowercase workspace folder paths (`c:\...`). All methods were incorrectly treated as external and hidden.
+
 ## [0.2.5] - 2026-03-19
 
 ### Added
