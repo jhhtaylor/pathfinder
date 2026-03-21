@@ -311,7 +311,15 @@ export class CallHierarchyProvider implements vscode.TreeDataProvider<CallNode>,
         }
         // If focus moved away from a text editor (e.g. to the sidebar) but the
         // panel already has content, keep showing it — don't clear on focus-out.
-        if (!vscode.window.activeTextEditor && this.baseUri) { return; }
+        // Also cancel any pending refresh timer: a prior editor-change may have
+        // queued one, and we must not let it fire now that focus has left.
+        if (!vscode.window.activeTextEditor && this.baseUri) {
+            if (this.debounceTimer) {
+                clearTimeout(this.debounceTimer);
+                this.debounceTimer = undefined;
+            }
+            return;
+        }
         if (this.debounceTimer) {
             clearTimeout(this.debounceTimer);
         }
