@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { isInWorkspace, compactSignature, findCallSiteOffsets, MAX_CALL_SITES } from '../callHierarchyProvider';
+import { isInWorkspace, compactSignature, findCallSiteOffsets, MAX_CALL_SITES, methodBodyRange } from '../callHierarchyProvider';
 
 function uri(fsPath: string): vscode.Uri {
     return vscode.Uri.file(fsPath);
@@ -295,5 +295,108 @@ suite('findCallSiteOffsets Test Suite', () => {
         const names = offsets.map(o => text.slice(o).match(/^[A-Za-z_][A-Za-z0-9_]*/)?.[0]);
         assert.ok(names.includes('outer'));
         assert.ok(names.includes('inner'));
+    });
+});
+
+// Helper: create a fake TextDocument backed by a plain string so we can test
+// methodBodyRange without an open VS Code workspace.
+function fakeDocument(content: string): vscode.TextDocument {
+    const lines = content.split('\n');
+    return {
+        getText(range?: vscode.Range): string {
+            if (!range) { return content; }
+            let result = '';
+            for (let l = range.start.line; l <= range.end.line; l++) {
+                const line = lines[l] ?? '';
+                const start = l === range.start.line ? range.start.character : 0;
+                const end   = l === range.end.line   ? range.end.character   : line.length;
+                result += line.slice(start, end);
+                if (l < range.end.line) { result += '\n'; }
+            }
+            return result;
+        },
+        offsetAt(position: vscode.Position): number {
+            let offset = 0;
+            for (let l = 0; l < position.line; l++) {
+                offset += (lines[l]?.length ?? 0) + 1; // +1 for \n
+            }
+            return offset + position.character;
+        },
+        positionAt(offset: number): vscode.Position {
+            let remaining = offset;
+            for (let l = 0; l < lines.length; l++) {
+                const len = (lines[l]?.length ?? 0) + 1;
+                if (remaining < len) { return new vscode.Position(l, remaining); }
+                remaining -= len;
+            }
+            return new vscode.Position(lines.length - 1, lines[lines.length - 1]?.length ?? 0);
+        },
+    } as unknown as vscode.TextDocument;
+}
+
+suite('methodBodyRange Test Suite', () => {
+
+    function rangeOf(doc: vscode.TextDocument, text: string): vscode.Range {
+        const content = doc.getText();
+        const start = doc.positionAt(0);
+        const end   = doc.positionAt(content.length);
+        return new vscode.Range(start, end);
+    }
+
+    test('block body: range starts after opening brace', () => {
+        const src = 'void Foo() {\n    Bar();\n}';
+        const doc  = fakeDocument(src);
+        const full = rangeOf(doc, src);
+        const body = methodBodyRange(doc, full);
+        const text = doc.getText(body);
+        // Must not include the signature line or the `{`
+        assert.ok(!text.includes('void Foo'), `Should not contain signature, got: ${text}`);
+        assert.ok(text.includes('Bar()'), `Should contain body call, got: ${text}`);
+    });
+
+    test('expression body: range starts after =>', () => {
+        const src = 'bool IsEven(int n) => n % 2 == 0;';
+        const doc  = fakeDocument(src);
+        const full = rangeOf(doc, src);
+        const body = methodBodyRange(doc, full);
+        const text = doc.getText(body);
+        assert.ok(!text.includes('IsEven'), `Should not contain method name, got: ${text}`);
+        assert.ok(text.includes('n % 2'), `Should contain body expression, got: ${text}`);
+    });
+
+    test('block body is preferred over => when { appears first', () => {
+        // Lambda inside block: void Fn() { var f = x => x+1; }
+        const src = 'void Fn() { var f = x => x+1; }';
+        const doc  = fakeDocument(src);
+        const full = rangeOf(doc, src);
+        const body = methodBodyRange(doc, full);
+        const text = doc.getText(body);
+        // The body starts after `{`, so `=>` is still present inside
+        assert.ok(text.includes('=>'), `Lambda => should remain in body text, got: ${text}`);
+        assert.ok(!text.includes('void Fn'), `Signature should be stripped, got: ${text}`);
+    });
+
+    test('returns full range when neither { nor => found', () => {
+        const src = 'abstract void NoBody';
+        const doc  = fakeDocument(src);
+        const full = rangeOf(doc, src);
+        const body = methodBodyRange(doc, full);
+        // Falls back to the full range
+        assert.deepStrictEqual(body, full);
+    });
+
+    // ── regression guard: false recursion bug (issue fixed in 0.2.9) ──────────
+
+    test('method name in signature line is excluded from scan range', () => {
+        // Before the fix, ProcessOrderAsync( in the signature would be scanned
+        // and resolve to itself, producing a spurious (recursive) child.
+        const src = 'async Task ProcessOrderAsync(int id) {\n    ValidateOrder(id);\n}';
+        const doc  = fakeDocument(src);
+        const full = rangeOf(doc, src);
+        const body = methodBodyRange(doc, full);
+        const text = doc.getText(body);
+        // The signature containing ProcessOrderAsync( must NOT be in the scan range
+        assert.ok(!text.includes('ProcessOrderAsync('), `Signature should be stripped, got: ${text}`);
+        assert.ok(text.includes('ValidateOrder('), `Body call must be present, got: ${text}`);
     });
 });

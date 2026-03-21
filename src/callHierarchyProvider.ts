@@ -283,7 +283,11 @@ export class CallHierarchyProvider implements vscode.TreeDataProvider<CallNode>,
             ancestor = ancestor.parent;
         }
 
-        const calls = await getCallsViaDefinitionProvider(document, node.callItem.range, ancestorKeys);
+        // Scan only the method BODY (after the opening `{` or `=>`), not the
+        // signature line. Without this, the method's own name in its declaration
+        // resolves back to itself and is falsely shown as a "(recursive)" child.
+        const scanRange = methodBodyRange(document, node.callItem.range);
+        const calls = await getCallsViaDefinitionProvider(document, scanRange, ancestorKeys);
 
         if (calls.length === 0) {
             this.markEmpty(node);
@@ -305,6 +309,9 @@ export class CallHierarchyProvider implements vscode.TreeDataProvider<CallNode>,
             this.suppressNextRefreshFlag = false;
             return;
         }
+        // If focus moved away from a text editor (e.g. to the sidebar) but the
+        // panel already has content, keep showing it — don't clear on focus-out.
+        if (!vscode.window.activeTextEditor && this.baseUri) { return; }
         if (this.debounceTimer) {
             clearTimeout(this.debounceTimer);
         }
@@ -330,6 +337,27 @@ export class CallHierarchyProvider implements vscode.TreeDataProvider<CallNode>,
             clearTimeout(this.debounceTimer);
         }
     }
+}
+
+/**
+ * Returns the sub-range of `fullRange` that starts after the method signature,
+ * i.e. from the first `{` (block body) or `=>` (expression body) to the end.
+ * Scanning only the body prevents the method's own name in its declaration
+ * line from being resolved as a call site and falsely flagged as recursive.
+ */
+export function methodBodyRange(document: vscode.TextDocument, fullRange: vscode.Range): vscode.Range {
+    const text = document.getText(fullRange);
+    const braceIdx = text.indexOf('{');
+    const arrowIdx = text.indexOf('=>');
+    let bodyStart = -1;
+    if (braceIdx !== -1 && (arrowIdx === -1 || braceIdx < arrowIdx)) {
+        bodyStart = braceIdx + 1;
+    } else if (arrowIdx !== -1) {
+        bodyStart = arrowIdx + 2;
+    }
+    if (bodyStart <= 0) { return fullRange; }
+    const startOffset = document.offsetAt(fullRange.start) + bodyStart;
+    return new vscode.Range(document.positionAt(startOffset), fullRange.end);
 }
 
 export const MAX_CALL_SITES = 50;
