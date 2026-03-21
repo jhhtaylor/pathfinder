@@ -2,6 +2,12 @@
 
 All notable changes to the Pathfinder extension will be documented in this file.
 
+## [0.2.9] - 2026-03-21
+
+### Improved
+
+- **Best-effort call hierarchy for unsupported languages**: C#, Ruby, PHP, Kotlin and similar languages now show an expandable call tree (up to the configured depth) built by resolving each call site in a method's body via the definition provider. Previously these languages showed a flat navigation-only list. Results are best-effort — cross-file calls across lambda capture boundaries or via dynamic dispatch may not be detected. The view indicates this with a "best-effort" banner.
+
 ## [0.2.7-0.2.8] - 2026-03-20
 
 ### Improved

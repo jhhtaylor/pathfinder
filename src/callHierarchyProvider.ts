@@ -11,6 +11,8 @@ export class CallHierarchyProvider implements vscode.TreeDataProvider<CallNode>,
     private suppressNextRefreshFlag = false;
     // Nodes whose getChildren() returned [] — rendered as leaves (no expand arrow)
     private emptyNodes = new WeakSet<CallNode>();
+    // Nodes created via the fallback path — children resolved via definition provider
+    private fallbackNodes = new WeakSet<CallNode>();
     // Cache of the last-built root nodes and the file they belong to
     private cachedRoots: CallNode[] = [];
     private baseUri: vscode.Uri | undefined;
@@ -33,6 +35,7 @@ export class CallHierarchyProvider implements vscode.TreeDataProvider<CallNode>,
     setDepth(depth: CallDepth): void {
         this.maxDepth = depth;
         this.emptyNodes = new WeakSet<CallNode>();
+        this.fallbackNodes = new WeakSet<CallNode>();
         this._onDidChangeTreeData.fire();
     }
 
@@ -51,11 +54,13 @@ export class CallHierarchyProvider implements vscode.TreeDataProvider<CallNode>,
 
     refresh(): void {
         this.emptyNodes = new WeakSet<CallNode>();
+        this.fallbackNodes = new WeakSet<CallNode>();
         this._onDidChangeTreeData.fire();
     }
 
     private resetAndFire(): void {
         this.emptyNodes = new WeakSet<CallNode>();
+        this.fallbackNodes = new WeakSet<CallNode>();
         this._onDidChangeTreeData.fire();
     }
 
@@ -125,8 +130,8 @@ export class CallHierarchyProvider implements vscode.TreeDataProvider<CallNode>,
         }
 
         // If the language server found methods but couldn't prepare call hierarchy
-        // for any of them, fall back to a flat navigable list built from the
-        // DocumentSymbol data so the view is still useful for navigation.
+        // for any of them, fall back to a best-effort list built from the
+        // DocumentSymbol data with children resolved via definition provider.
         if (methods.length > 0 && nodes.length === 0) {
             for (const symbol of methods) {
                 // Don't pass a hint: the symbol name from many language servers
@@ -140,14 +145,12 @@ export class CallHierarchyProvider implements vscode.TreeDataProvider<CallNode>,
                     symbol.range,
                     symbol.selectionRange
                 );
-                // nodeDepth === maxDepth forces collapsibleState = None (no children possible)
-                const node = new CallNode(fallbackItem, this.maxDepth, this.maxDepth, true, undefined);
-                this.emptyNodes.add(node);
+                const node = new CallNode(fallbackItem, 1, this.maxDepth, true, undefined);
+                this.fallbackNodes.add(node);
                 nodes.push(node);
             }
             this.setMessage(
-                'Outgoing call hierarchy is not supported for this language. ' +
-                'Methods are listed for navigation only.'
+                'Call hierarchy is not natively supported for this language — showing best-effort results using definition lookup. Expansion may be incomplete.'
             );
             this.baseUri = editor.document.uri;
             this.cachedRoots = nodes;
@@ -178,6 +181,10 @@ export class CallHierarchyProvider implements vscode.TreeDataProvider<CallNode>,
         const nextDepth = node.nodeDepth + 1;
         if (nextDepth > this.maxDepth) {
             return [];
+        }
+
+        if (this.fallbackNodes.has(node)) {
+            return this.getFallbackChildren(node);
         }
 
         let outgoing: vscode.CallHierarchyOutgoingCall[] | undefined;
@@ -257,6 +264,42 @@ export class CallHierarchyProvider implements vscode.TreeDataProvider<CallNode>,
         }
     }
 
+    private async getFallbackChildren(node: CallNode): Promise<CallNode[]> {
+        const nextDepth = node.nodeDepth + 1;
+
+        let document: vscode.TextDocument;
+        try {
+            document = await vscode.workspace.openTextDocument(node.callItem.uri);
+        } catch {
+            this.markEmpty(node);
+            return [];
+        }
+
+        // Build the set of ancestor keys to detect recursive cycles
+        const ancestorKeys = new Set<string>();
+        let ancestor: CallNode | undefined = node;
+        while (ancestor) {
+            ancestorKeys.add(`${ancestor.callItem.uri.toString()}::${ancestor.callItem.selectionRange.start.line}`);
+            ancestor = ancestor.parent;
+        }
+
+        const calls = await getCallsViaDefinitionProvider(document, node.callItem.range, ancestorKeys);
+
+        if (calls.length === 0) {
+            this.markEmpty(node);
+            return [];
+        }
+
+        const result: CallNode[] = [];
+        for (const { item, isRecursive } of calls) {
+            const child = new CallNode(item, nextDepth, this.maxDepth, false, undefined, isRecursive);
+            child.parent = node;
+            this.fallbackNodes.add(child);
+            result.push(child);
+        }
+        return result;
+    }
+
     private debouncedRefresh(): void {
         if (this.suppressNextRefreshFlag) {
             this.suppressNextRefreshFlag = false;
@@ -287,6 +330,106 @@ export class CallHierarchyProvider implements vscode.TreeDataProvider<CallNode>,
             clearTimeout(this.debounceTimer);
         }
     }
+}
+
+export const MAX_CALL_SITES = 50;
+
+/** Regex that matches potential call sites: an identifier immediately followed by `(`. */
+export const CALL_SITE_REGEX = /\b([A-Za-z_][A-Za-z0-9_]*)\s*\(/g;
+
+/**
+ * Scan `text` for call-site candidates and return the char-offset of each
+ * identifier start (i.e. the index of the first letter of the callee name).
+ * Exported for unit testing; the caller is responsible for capping results.
+ */
+export function findCallSiteOffsets(text: string, max = MAX_CALL_SITES): number[] {
+    const re = new RegExp(CALL_SITE_REGEX.source, 'g');
+    const offsets: number[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null && offsets.length < max) {
+        offsets.push(m.index);
+    }
+    return offsets;
+}
+
+async function getCallsViaDefinitionProvider(
+    document: vscode.TextDocument,
+    methodRange: vscode.Range,
+    ancestorKeys: Set<string>
+): Promise<Array<{ item: vscode.CallHierarchyItem; isRecursive: boolean }>> {
+    const bodyText = document.getText(methodRange);
+    const startOffset = document.offsetAt(methodRange.start);
+    const offsets = findCallSiteOffsets(bodyText);
+
+    const seen = new Set<string>();
+    const results: Array<{ item: vscode.CallHierarchyItem; isRecursive: boolean }> = [];
+
+    for (const offset of offsets) {
+        const position = document.positionAt(startOffset + offset);
+
+        let locations: (vscode.Location | vscode.LocationLink)[] | undefined;
+        try {
+            locations = await vscode.commands.executeCommand<(vscode.Location | vscode.LocationLink)[]>(
+                'vscode.executeDefinitionProvider',
+                document.uri,
+                position
+            );
+        } catch {
+            continue;
+        }
+
+        if (!locations || locations.length === 0) { continue; }
+
+        for (const loc of locations) {
+            let targetUri: vscode.Uri;
+            let targetRange: vscode.Range;
+
+            if ('targetUri' in loc) {
+                // LocationLink
+                targetUri = loc.targetUri;
+                targetRange = loc.targetSelectionRange ?? loc.targetRange;
+            } else {
+                // Location
+                targetUri = loc.uri;
+                targetRange = loc.range;
+            }
+
+            if (!isInWorkspace(targetUri)) { continue; }
+
+            let symbols: vscode.DocumentSymbol[] | undefined;
+            try {
+                symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+                    'vscode.executeDocumentSymbolProvider',
+                    targetUri
+                );
+            } catch {
+                continue;
+            }
+
+            if (!symbols) { continue; }
+
+            const callables = extractCallableSymbols(symbols);
+            const sym = callables.find(s => s.selectionRange.start.line === targetRange.start.line);
+            if (!sym) { continue; }
+
+            const key = `${targetUri.toString()}::${sym.selectionRange.start.line}`;
+            if (seen.has(key)) { continue; }
+            seen.add(key);
+
+            const isRecursive = ancestorKeys.has(key);
+            const item = new vscode.CallHierarchyItem(
+                sym.kind,
+                sym.name,
+                sym.detail || '',
+                targetUri,
+                sym.range,
+                sym.selectionRange
+            );
+            results.push({ item, isRecursive });
+        }
+    }
+
+    return results;
 }
 
 function extractCallableSymbols(symbols: vscode.DocumentSymbol[]): vscode.DocumentSymbol[] {

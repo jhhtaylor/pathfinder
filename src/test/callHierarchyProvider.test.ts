@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { isInWorkspace, compactSignature } from '../callHierarchyProvider';
+import { isInWorkspace, compactSignature, findCallSiteOffsets, MAX_CALL_SITES } from '../callHierarchyProvider';
 
 function uri(fsPath: string): vscode.Uri {
     return vscode.Uri.file(fsPath);
@@ -173,7 +173,7 @@ suite('compactSignature Test Suite', () => {
         assert.strictEqual(compactSignature('EmployeesController'), 'EmployeesController');
     });
 
-    test('fallback nodes use undefined hint so label equals method name only', () => {
+    test('fallback nodes use undefined hint so label equals method name only — 0.2.7 regression guard', () => {
         // The 0.2.7 fix: in the language-server fallback path we pass undefined as
         // the hint instead of compactSignature(symbol.detail, symbol.name).
         // Verify CallNode honours that: label must equal callItem.name with no extra text.
@@ -190,5 +190,110 @@ suite('compactSignature Test Suite', () => {
         const { maxDepth } = { maxDepth: 3 };
         const node = new CallNode(item, maxDepth, maxDepth, true, undefined);
         assert.strictEqual(node.label, 'GetEmployees');
+    });
+});
+
+suite('findCallSiteOffsets Test Suite', () => {
+
+    // ── basic detection ───────────────────────────────────────────────────────
+
+    test('detects a simple function call', () => {
+        const offsets = findCallSiteOffsets('doWork()');
+        assert.strictEqual(offsets.length, 1);
+        assert.strictEqual(offsets[0], 0);
+    });
+
+    test('detects multiple distinct calls', () => {
+        const text = 'validateOrder(id); calculateTotal(id); sendEmail(to);';
+        const offsets = findCallSiteOffsets(text);
+        assert.strictEqual(offsets.length, 3);
+    });
+
+    test('detects await-prefixed async calls', () => {
+        const text = 'await SendConfirmationAsync(orderId);';
+        const offsets = findCallSiteOffsets(text);
+        // Should find SendConfirmationAsync( — "await" is not followed by (
+        assert.ok(offsets.some(o => text.slice(o).startsWith('SendConfirmationAsync')));
+    });
+
+    test('detects LINQ method chain calls', () => {
+        const text = 'items.Where(x => x.Active).Select(x => x.Id).ToList()';
+        const offsets = findCallSiteOffsets(text);
+        // Should find Where, Select, ToList (and possibly the lambda bodies)
+        const names = offsets.map(o => text.slice(o).match(/^[A-Za-z_][A-Za-z0-9_]*/)?.[0]);
+        assert.ok(names.includes('Where'));
+        assert.ok(names.includes('Select'));
+        assert.ok(names.includes('ToList'));
+    });
+
+    test('detects method call with keyword-like identifier in args', () => {
+        // "new" and "if" appear, but the actual call is ProcessOrder
+        const text = 'var result = ProcessOrder(new OrderDto { Id = 1 });';
+        const offsets = findCallSiteOffsets(text);
+        const names = offsets.map(o => text.slice(o).match(/^[A-Za-z_][A-Za-z0-9_]*/)?.[0]);
+        assert.ok(names.includes('ProcessOrder'));
+    });
+
+    test('detects calls in C#-style async method body', () => {
+        const text = [
+            'public async Task ProcessAsync(int id) {',
+            '    var order = await GetOrderAsync(id);',
+            '    var total = CalculateTotal(order);',
+            '    await NotifyAsync(order.Email, total);',
+            '}'
+        ].join('\n');
+        const offsets = findCallSiteOffsets(text);
+        const names = offsets.map(o => text.slice(o).match(/^[A-Za-z_][A-Za-z0-9_]*/)?.[0]);
+        assert.ok(names.includes('GetOrderAsync'));
+        assert.ok(names.includes('CalculateTotal'));
+        assert.ok(names.includes('NotifyAsync'));
+    });
+
+    // ── deduplication is NOT done here (done in the async caller) ─────────────
+
+    test('returns duplicates when the same call appears multiple times', () => {
+        const text = 'Validate(a); Validate(b); Validate(c);';
+        const offsets = findCallSiteOffsets(text);
+        const names = offsets.map(o => text.slice(o).match(/^[A-Za-z_][A-Za-z0-9_]*/)?.[0]);
+        assert.strictEqual(names.filter(n => n === 'Validate').length, 3);
+    });
+
+    // ── cap ───────────────────────────────────────────────────────────────────
+
+    test('returns at most MAX_CALL_SITES results', () => {
+        // Build a string with more call sites than the cap
+        const calls = Array.from({ length: MAX_CALL_SITES + 10 }, (_, i) => `fn${i}()`).join('; ');
+        const offsets = findCallSiteOffsets(calls);
+        assert.strictEqual(offsets.length, MAX_CALL_SITES);
+    });
+
+    test('custom max parameter is respected', () => {
+        const text = 'a(); b(); c(); d(); e();';
+        assert.strictEqual(findCallSiteOffsets(text, 3).length, 3);
+        assert.strictEqual(findCallSiteOffsets(text, 5).length, 5);
+    });
+
+    // ── edge cases ────────────────────────────────────────────────────────────
+
+    test('returns empty array for text with no calls', () => {
+        assert.deepStrictEqual(findCallSiteOffsets('var x = 42;'), []);
+    });
+
+    test('handles empty string', () => {
+        assert.deepStrictEqual(findCallSiteOffsets(''), []);
+    });
+
+    test('does not match identifiers not immediately followed by (', () => {
+        // "foo" by itself is not a call site
+        const offsets = findCallSiteOffsets('foo bar baz');
+        assert.strictEqual(offsets.length, 0);
+    });
+
+    test('handles nested calls — both outer and inner are detected', () => {
+        const text = 'outer(inner(x))';
+        const offsets = findCallSiteOffsets(text);
+        const names = offsets.map(o => text.slice(o).match(/^[A-Za-z_][A-Za-z0-9_]*/)?.[0]);
+        assert.ok(names.includes('outer'));
+        assert.ok(names.includes('inner'));
     });
 });
