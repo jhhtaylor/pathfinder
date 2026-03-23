@@ -2,6 +2,18 @@
 
 All notable changes to the Pathfinder extension will be documented in this file.
 
+## [0.2.10] - 2026-03-23
+
+### Improved
+
+- **Interface → implementation resolution**: for all supported languages, Pathfinder now prefers the concrete implementation over the interface declaration when building the call tree. Calls through interface-typed variables (e.g. `_service.Process()` where `_service: IService`) resolve directly to the implementing class rather than the interface. Works in both the native call hierarchy path (TypeScript, Go, Java, Python, C/C++) and the best-effort path (C#, Ruby, PHP, Kotlin).
+
+### Fixed
+
+- **"Go to Definition" now navigates to the interface/declaration**: previously this command was identical to clicking the node (navigated to the implementation). It now correctly navigates to the interface or abstract declaration. The stored definition item is used when available; otherwise the language server's definition provider is called at the node's position.
+- **Panel clears when clicking the sidebar**: fixed a race where switching files queued a 400 ms refresh timer that then fired after focus moved to the sidebar, clearing the panel. The timer is now also cancelled on focus-out so the panel stays populated.
+- **False "(recursive)" nodes from method signatures**: the best-effort scanner was including the method's own declaration line in the scan range, causing the method's name in its signature to resolve back to itself. Fixed by scanning only after the opening `{` or `=>`. Interface methods and abstract declarations (which have no body) are now treated as leaves immediately.
+
 ## [0.2.9] - 2026-03-21
 
 ### Improved
