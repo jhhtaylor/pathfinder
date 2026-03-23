@@ -286,7 +286,12 @@ export class CallHierarchyProvider implements vscode.TreeDataProvider<CallNode>,
         // Scan only the method BODY (after the opening `{` or `=>`), not the
         // signature line. Without this, the method's own name in its declaration
         // resolves back to itself and is falsely shown as a "(recursive)" child.
+        // null means no body (interface / abstract) — nothing to expand.
         const scanRange = methodBodyRange(document, node.callItem.range);
+        if (!scanRange) {
+            this.markEmpty(node);
+            return [];
+        }
         const calls = await getCallsViaDefinitionProvider(document, scanRange, ancestorKeys);
 
         if (calls.length === 0) {
@@ -350,10 +355,12 @@ export class CallHierarchyProvider implements vscode.TreeDataProvider<CallNode>,
 /**
  * Returns the sub-range of `fullRange` that starts after the method signature,
  * i.e. from the first `{` (block body) or `=>` (expression body) to the end.
+ * Returns `null` when no body marker is found — this indicates an abstract
+ * method or interface declaration, which has nothing to scan.
  * Scanning only the body prevents the method's own name in its declaration
  * line from being resolved as a call site and falsely flagged as recursive.
  */
-export function methodBodyRange(document: vscode.TextDocument, fullRange: vscode.Range): vscode.Range {
+export function methodBodyRange(document: vscode.TextDocument, fullRange: vscode.Range): vscode.Range | null {
     const text = document.getText(fullRange);
     const braceIdx = text.indexOf('{');
     const arrowIdx = text.indexOf('=>');
@@ -363,7 +370,7 @@ export function methodBodyRange(document: vscode.TextDocument, fullRange: vscode
     } else if (arrowIdx !== -1) {
         bodyStart = arrowIdx + 2;
     }
-    if (bodyStart <= 0) { return fullRange; }
+    if (bodyStart <= 0) { return null; } // no body — abstract / interface method
     const startOffset = document.offsetAt(fullRange.start) + bodyStart;
     return new vscode.Range(document.positionAt(startOffset), fullRange.end);
 }
@@ -403,15 +410,29 @@ async function getCallsViaDefinitionProvider(
     for (const offset of offsets) {
         const position = document.positionAt(startOffset + offset);
 
+        // Prefer the implementation provider so that calls through interfaces
+        // resolve to the concrete class rather than the interface declaration.
+        // Fall back to the definition provider when no implementations are found
+        // (e.g. for direct method calls that are already concrete).
         let locations: (vscode.Location | vscode.LocationLink)[] | undefined;
         try {
             locations = await vscode.commands.executeCommand<(vscode.Location | vscode.LocationLink)[]>(
-                'vscode.executeDefinitionProvider',
+                'vscode.executeImplementationProvider',
                 document.uri,
                 position
             );
-        } catch {
-            continue;
+        } catch { /* not supported — fall through */ }
+
+        if (!locations || locations.length === 0) {
+            try {
+                locations = await vscode.commands.executeCommand<(vscode.Location | vscode.LocationLink)[]>(
+                    'vscode.executeDefinitionProvider',
+                    document.uri,
+                    position
+                );
+            } catch {
+                continue;
+            }
         }
 
         if (!locations || locations.length === 0) { continue; }

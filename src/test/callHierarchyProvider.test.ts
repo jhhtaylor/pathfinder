@@ -348,7 +348,8 @@ suite('methodBodyRange Test Suite', () => {
         const doc  = fakeDocument(src);
         const full = rangeOf(doc, src);
         const body = methodBodyRange(doc, full);
-        const text = doc.getText(body);
+        assert.ok(body !== null, 'block body should not return null');
+        const text = doc.getText(body!);
         // Must not include the signature line or the `{`
         assert.ok(!text.includes('void Foo'), `Should not contain signature, got: ${text}`);
         assert.ok(text.includes('Bar()'), `Should contain body call, got: ${text}`);
@@ -359,7 +360,8 @@ suite('methodBodyRange Test Suite', () => {
         const doc  = fakeDocument(src);
         const full = rangeOf(doc, src);
         const body = methodBodyRange(doc, full);
-        const text = doc.getText(body);
+        assert.ok(body !== null, 'expression body should not return null');
+        const text = doc.getText(body!);
         assert.ok(!text.includes('IsEven'), `Should not contain method name, got: ${text}`);
         assert.ok(text.includes('n % 2'), `Should contain body expression, got: ${text}`);
     });
@@ -370,19 +372,27 @@ suite('methodBodyRange Test Suite', () => {
         const doc  = fakeDocument(src);
         const full = rangeOf(doc, src);
         const body = methodBodyRange(doc, full);
-        const text = doc.getText(body);
+        assert.ok(body !== null, 'block body with lambda should not return null');
+        const text = doc.getText(body!);
         // The body starts after `{`, so `=>` is still present inside
         assert.ok(text.includes('=>'), `Lambda => should remain in body text, got: ${text}`);
         assert.ok(!text.includes('void Fn'), `Signature should be stripped, got: ${text}`);
     });
 
-    test('returns full range when neither { nor => found', () => {
-        const src = 'abstract void NoBody';
+    test('returns null when neither { nor => found (abstract / interface method)', () => {
+        const src = 'abstract void NoBody();';
         const doc  = fakeDocument(src);
         const full = rangeOf(doc, src);
         const body = methodBodyRange(doc, full);
-        // Falls back to the full range
-        assert.deepStrictEqual(body, full);
+        // No body marker → null so the caller skips scanning entirely
+        assert.strictEqual(body, null);
+    });
+
+    test('C# interface method returns null (no body to scan)', () => {
+        const src = '    Task<IEnumerable<Employee>> GetAllAsync(CancellationToken ct = default);';
+        const doc  = fakeDocument(src);
+        const full = rangeOf(doc, src);
+        assert.strictEqual(methodBodyRange(doc, full), null);
     });
 
     // ── regression guard: false recursion bug (issue fixed in 0.2.9) ──────────
@@ -394,7 +404,8 @@ suite('methodBodyRange Test Suite', () => {
         const doc  = fakeDocument(src);
         const full = rangeOf(doc, src);
         const body = methodBodyRange(doc, full);
-        const text = doc.getText(body);
+        assert.ok(body !== null, 'method with block body should not return null');
+        const text = doc.getText(body!);
         // The signature containing ProcessOrderAsync( must NOT be in the scan range
         assert.ok(!text.includes('ProcessOrderAsync('), `Signature should be stripped, got: ${text}`);
         assert.ok(text.includes('ValidateOrder('), `Body call must be present, got: ${text}`);
