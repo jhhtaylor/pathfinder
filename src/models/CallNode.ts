@@ -7,6 +7,10 @@ export class CallNode extends vscode.TreeItem {
     public readonly nodeDepth: number;
     public readonly isRoot: boolean;
     public parent: CallNode | undefined;
+    /** Set when callItem is an implementation and a distinct interface/abstract
+     *  declaration exists. Used by "Go to Definition" to navigate to the contract
+     *  rather than the concrete class. */
+    public definitionItem: vscode.CallHierarchyItem | undefined;
 
     constructor(
         callItem: vscode.CallHierarchyItem,

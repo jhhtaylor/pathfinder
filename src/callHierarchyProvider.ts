@@ -220,14 +220,41 @@ export class CallHierarchyProvider implements vscode.TreeDataProvider<CallNode>,
             if (excludeExternal && !isInWorkspace(call.to.uri)) {
                 continue;
             }
-            const key = `${call.to.uri.toString()}::${call.to.selectionRange.start.line}::${call.to.name}`;
+
+            // For native call hierarchy languages (TypeScript, Go, Java etc.),
+            // the language server may report the interface declaration rather than
+            // the concrete implementation. Try the implementation provider at the
+            // first call-site range to get the concrete class instead.
+            let resolvedTo = call.to;
+            let definitionItem: vscode.CallHierarchyItem | undefined;
+            if (call.fromRanges.length > 0) {
+                try {
+                    const implLocs = await vscode.commands.executeCommand<(vscode.Location | vscode.LocationLink)[]>(
+                        'vscode.executeImplementationProvider',
+                        node.callItem.uri,
+                        call.fromRanges[0].start
+                    ) ?? [];
+                    const implItem = await callHierarchyItemFromLocations(implLocs);
+                    if (implItem && (
+                        implItem.uri.toString() !== call.to.uri.toString() ||
+                        implItem.selectionRange.start.line !== call.to.selectionRange.start.line
+                    )) {
+                        // We found a different (more concrete) target
+                        resolvedTo = implItem;
+                        definitionItem = call.to; // original = the interface
+                    }
+                } catch { /* implementation provider not supported — use call.to */ }
+            }
+
+            const key = `${resolvedTo.uri.toString()}::${resolvedTo.selectionRange.start.line}::${resolvedTo.name}`;
             if (!seen.has(key)) {
                 seen.add(key);
-                const hint = await resolveSignatureHint(call.to);
-                const childKey = `${call.to.uri.toString()}::${call.to.selectionRange.start.line}`;
+                const hint = await resolveSignatureHint(resolvedTo);
+                const childKey = `${resolvedTo.uri.toString()}::${resolvedTo.selectionRange.start.line}`;
                 const isRecursive = ancestorKeys.has(childKey);
-                const child = new CallNode(call.to, nextDepth, this.maxDepth, false, hint, isRecursive);
+                const child = new CallNode(resolvedTo, nextDepth, this.maxDepth, false, hint, isRecursive);
                 child.parent = node;
+                child.definitionItem = definitionItem;
                 result.push(child);
             }
         }
@@ -300,9 +327,10 @@ export class CallHierarchyProvider implements vscode.TreeDataProvider<CallNode>,
         }
 
         const result: CallNode[] = [];
-        for (const { item, isRecursive } of calls) {
+        for (const { item, definitionItem, isRecursive } of calls) {
             const child = new CallNode(item, nextDepth, this.maxDepth, false, undefined, isRecursive);
             child.parent = node;
+            child.definitionItem = definitionItem;
             this.fallbackNodes.add(child);
             result.push(child);
         }
@@ -399,70 +427,51 @@ async function getCallsViaDefinitionProvider(
     document: vscode.TextDocument,
     methodRange: vscode.Range,
     ancestorKeys: Set<string>
-): Promise<Array<{ item: vscode.CallHierarchyItem; isRecursive: boolean }>> {
+): Promise<Array<{ item: vscode.CallHierarchyItem; definitionItem?: vscode.CallHierarchyItem; isRecursive: boolean }>> {
     const bodyText = document.getText(methodRange);
     const startOffset = document.offsetAt(methodRange.start);
     const offsets = findCallSiteOffsets(bodyText);
 
     const seen = new Set<string>();
-    const results: Array<{ item: vscode.CallHierarchyItem; isRecursive: boolean }> = [];
+    const results: Array<{ item: vscode.CallHierarchyItem; definitionItem?: vscode.CallHierarchyItem; isRecursive: boolean }> = [];
 
     for (const offset of offsets) {
         const position = document.positionAt(startOffset + offset);
 
-        // Prefer the implementation provider so that calls through interfaces
-        // resolve to the concrete class rather than the interface declaration.
-        // Fall back to the definition provider when no implementations are found
-        // (e.g. for direct method calls that are already concrete).
-        let locations: (vscode.Location | vscode.LocationLink)[] | undefined;
-        try {
-            locations = await vscode.commands.executeCommand<(vscode.Location | vscode.LocationLink)[]>(
-                'vscode.executeImplementationProvider',
-                document.uri,
-                position
-            );
-        } catch { /* not supported — fall through */ }
+        // Run implementation and definition providers in parallel.
+        // Implementation provider resolves interface calls to the concrete class.
+        // Definition provider gives us the interface/abstract declaration —
+        // stored separately so "Go to Definition" can navigate there.
+        const [implLocations, defLocations] = await Promise.all([
+            vscode.commands.executeCommand<(vscode.Location | vscode.LocationLink)[]>(
+                'vscode.executeImplementationProvider', document.uri, position
+            ).then(r => r ?? [], () => [] as (vscode.Location | vscode.LocationLink)[]),
+            vscode.commands.executeCommand<(vscode.Location | vscode.LocationLink)[]>(
+                'vscode.executeDefinitionProvider', document.uri, position
+            ).then(r => r ?? [], () => [] as (vscode.Location | vscode.LocationLink)[]),
+        ]);
 
-        if (!locations || locations.length === 0) {
-            try {
-                locations = await vscode.commands.executeCommand<(vscode.Location | vscode.LocationLink)[]>(
-                    'vscode.executeDefinitionProvider',
-                    document.uri,
-                    position
-                );
-            } catch {
-                continue;
-            }
-        }
+        // Prefer implementations; fall back to definitions when there are none.
+        const useImpl = implLocations.length > 0;
+        const primaryLocs = useImpl ? implLocations : defLocations;
+        if (primaryLocs.length === 0) { continue; }
 
-        if (!locations || locations.length === 0) { continue; }
-
-        for (const loc of locations) {
-            let targetUri: vscode.Uri;
-            let targetRange: vscode.Range;
-
-            if ('targetUri' in loc) {
-                // LocationLink
-                targetUri = loc.targetUri;
-                targetRange = loc.targetSelectionRange ?? loc.targetRange;
-            } else {
-                // Location
-                targetUri = loc.uri;
-                targetRange = loc.range;
-            }
+        for (const loc of primaryLocs) {
+            const targetUri    = 'targetUri' in loc ? loc.targetUri : (loc as vscode.Location).uri;
+            const ll = loc as vscode.LocationLink;
+            const targetRange  = 'targetUri' in loc
+                ? (ll.targetSelectionRange ?? ll.targetRange)
+                : (loc as vscode.Location).range;
+            if (!targetRange) { continue; }
 
             if (!isInWorkspace(targetUri)) { continue; }
 
             let symbols: vscode.DocumentSymbol[] | undefined;
             try {
                 symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
-                    'vscode.executeDocumentSymbolProvider',
-                    targetUri
+                    'vscode.executeDocumentSymbolProvider', targetUri
                 );
-            } catch {
-                continue;
-            }
-
+            } catch { continue; }
             if (!symbols) { continue; }
 
             const callables = extractCallableSymbols(symbols);
@@ -475,18 +484,57 @@ async function getCallsViaDefinitionProvider(
 
             const isRecursive = ancestorKeys.has(key);
             const item = new vscode.CallHierarchyItem(
-                sym.kind,
-                sym.name,
-                sym.detail || '',
-                targetUri,
-                sym.range,
-                sym.selectionRange
+                sym.kind, sym.name, sym.detail || '',
+                targetUri, sym.range, sym.selectionRange
             );
-            results.push({ item, isRecursive });
+
+            // Build the definition item from the def-provider locations when it
+            // differs from the implementation (e.g. points to an interface).
+            let definitionItem: vscode.CallHierarchyItem | undefined;
+            if (useImpl && defLocations.length > 0) {
+                definitionItem = await callHierarchyItemFromLocations(defLocations);
+                // Discard if it points to the same place as the implementation
+                if (definitionItem && definitionItem.uri.toString() === targetUri.toString()
+                    && definitionItem.selectionRange.start.line === sym.selectionRange.start.line) {
+                    definitionItem = undefined;
+                }
+            }
+
+            results.push({ item, definitionItem, isRecursive });
         }
     }
 
     return results;
+}
+
+/** Build a CallHierarchyItem from the first workspace location in a location list. */
+async function callHierarchyItemFromLocations(
+    locs: (vscode.Location | vscode.LocationLink)[]
+): Promise<vscode.CallHierarchyItem | undefined> {
+    for (const loc of locs) {
+        const targetUri   = 'targetUri' in loc ? loc.targetUri : (loc as vscode.Location).uri;
+        const ll = loc as vscode.LocationLink;
+        const targetRange = 'targetUri' in loc
+            ? (ll.targetSelectionRange ?? ll.targetRange)
+            : (loc as vscode.Location).range;
+        if (!targetRange) { continue; }
+        if (!isInWorkspace(targetUri)) { continue; }
+        let symbols: vscode.DocumentSymbol[] | undefined;
+        try {
+            symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+                'vscode.executeDocumentSymbolProvider', targetUri
+            );
+        } catch { continue; }
+        if (!symbols) { continue; }
+        const sym = extractCallableSymbols(symbols)
+            .find(s => s.selectionRange.start.line === targetRange.start.line);
+        if (!sym) { continue; }
+        return new vscode.CallHierarchyItem(
+            sym.kind, sym.name, sym.detail || '',
+            targetUri, sym.range, sym.selectionRange
+        );
+    }
+    return undefined;
 }
 
 function extractCallableSymbols(symbols: vscode.DocumentSymbol[]): vscode.DocumentSymbol[] {

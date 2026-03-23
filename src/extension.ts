@@ -141,7 +141,7 @@ export function activate(context: vscode.ExtensionContext) {
             }
         ),
         vscode.commands.registerCommand('pathfinder.callHierarchy.goToDefinition',
-            (node: CallNode) => navigateToCallNode(node.callItem)
+            (node: CallNode) => goToDefinitionFromNode(node)
         ),
         vscode.commands.registerCommand('pathfinder.callHierarchy.addToCodePath',
             (node: CallNode) => addCallNodeToCodePath(node)
@@ -759,6 +759,54 @@ async function showMoreOptions() {
             );
             break;
     }
+}
+
+/**
+ * "Go to Definition" from a call hierarchy node.
+ * Uses the stored definitionItem (interface / abstract declaration) when one
+ * is available, otherwise falls back to executeDefinitionProvider at the
+ * callItem's own position, and finally to navigateToCallNode.
+ */
+async function goToDefinitionFromNode(node: CallNode) {
+    // Use the pre-resolved definition item (interface) if we have one.
+    if (node.definitionItem) {
+        return navigateToCallNode(node.definitionItem);
+    }
+
+    // Attempt to find a distinct definition via the language server.
+    const item = node.callItem;
+    let defs: (vscode.Location | vscode.LocationLink)[] | undefined;
+    try {
+        defs = await vscode.commands.executeCommand<(vscode.Location | vscode.LocationLink)[]>(
+            'vscode.executeDefinitionProvider',
+            item.uri,
+            item.selectionRange.start
+        );
+    } catch { /* fall through */ }
+
+    if (defs && defs.length > 0) {
+        const def = defs[0];
+        const defUri   = 'targetUri' in def ? def.targetUri : (def as vscode.Location).uri;
+        const ll = def as vscode.LocationLink;
+        const defRange = 'targetUri' in def
+            ? (ll.targetSelectionRange ?? ll.targetRange)
+            : (def as vscode.Location).range;
+        // Only use if it points somewhere different from the current node
+        const sameAsNode = !defRange
+            || (defUri.toString() === item.uri.toString()
+                && defRange.start.line === item.selectionRange.start.line);
+        if (!sameAsNode && defRange) {
+            const doc = await vscode.workspace.openTextDocument(defUri);
+            const selection = new vscode.Selection(defRange.start, defRange.start);
+            const editor = await vscode.window.showTextDocument(doc, { selection });
+            editor.revealRange(defRange, vscode.TextEditorRevealType.InCenter);
+            highlightLine(editor, defRange.start.line);
+            return;
+        }
+    }
+
+    // Fall back: navigate to the callItem itself.
+    await navigateToCallNode(item);
 }
 
 async function navigateToCallNode(item: vscode.CallHierarchyItem) {

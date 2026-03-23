@@ -101,12 +101,14 @@ The Call Hierarchy view depends on the installed language server extension adver
 | Python | Pylance | ✅ Full tree |
 | C / C++ | clangd | ✅ Full tree |
 | Rust | rust-analyzer | ⚠️ Works, some known bugs |
-| C# | OmniSharp / C# Dev Kit | 🔄 Methods listed for navigation only |
-| Ruby | Solargraph / Ruby LSP | 🔄 Methods listed for navigation only |
-| PHP | Intelephense | 🔄 Methods listed for navigation only |
-| Kotlin | Kotlin Language Server | 🔄 Methods listed for navigation only |
+| C# | OmniSharp / C# Dev Kit | ✅ Best-effort tree (via definition lookup) |
+| Ruby | Solargraph / Ruby LSP | ✅ Best-effort tree (via definition lookup) |
+| PHP | Intelephense | ✅ Best-effort tree (via definition lookup) |
+| Kotlin | Kotlin Language Server | ✅ Best-effort tree (via definition lookup) |
 
-For languages in the 🔄 row, the panel shows all methods in the file as clickable navigation items with a note explaining that outgoing call hierarchy is unsupported. The Code Paths feature works for all languages regardless.
+Languages in the "best-effort" row use definition and implementation lookup to build the call tree. Expansion may be incomplete for calls through dynamic dispatch or lambdas. A banner in the panel indicates this mode.
+
+**Interface / abstract calls**: for all languages, Pathfinder prefers the concrete implementation over the interface declaration when building the call tree. Right-clicking a node and choosing **Go to Definition** navigates to the interface or abstract declaration instead. The Code Paths feature works for all languages regardless.
 
 ## Requirements
 
