@@ -141,10 +141,12 @@ export class PathfinderDataProvider implements vscode.TreeDataProvider<CodePath 
         }));
 
         this.workspaceState.update('pathfinder.codePaths', serialized);
+        this.workspaceState.update('pathfinder.lineNumbers1Based', true);
     }
 
     private loadCodePaths() {
         const saved = this.workspaceState.get<any[]>('pathfinder.codePaths', []);
+        const migrated = this.workspaceState.get<boolean>('pathfinder.lineNumbers1Based', false);
         this.codePaths = saved.map(data => {
             const path = new CodePath(
                 data.label,
@@ -156,9 +158,10 @@ export class PathfinderDataProvider implements vscode.TreeDataProvider<CodePath 
             if (data.steps) {
                 data.steps.forEach((stepData: any) => {
                     if (stepData.filePath) {
+                        const lineNumber = migrated ? stepData.lineNumber : stepData.lineNumber + 1;
                         path.addStep(
                             stepData.filePath,
-                            stepData.lineNumber,
+                            lineNumber,
                             stepData.columnNumber || 0,
                             stepData.codeSnippet,
                             stepData.customLabel
@@ -169,6 +172,10 @@ export class PathfinderDataProvider implements vscode.TreeDataProvider<CodePath 
 
             return path;
         });
+        if (!migrated && saved.length > 0) {
+            this.workspaceState.update('pathfinder.lineNumbers1Based', true);
+            this.saveCodePaths();
+        }
     }
 
     getPathForStep(step: PathStep): CodePath | undefined {

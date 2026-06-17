@@ -89,7 +89,7 @@ suite('CodePath Model Test Suite', () => {
         path.addStep('/test/file.ts', 10);
 
         const step = path.steps[0];
-        assert.ok((step.description as string).includes('Line 11')); // Line numbers are 0-indexed, displayed as 1-indexed
+        assert.ok((step.description as string).includes('Line 10'));
     });
 
     test('Should assign random color on creation', () => {

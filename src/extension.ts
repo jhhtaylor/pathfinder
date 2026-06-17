@@ -317,11 +317,11 @@ async function addToCodePath() {
 
     const filePath = editor.document.uri.fsPath;
     const position = editor.selection.active;
-    const lineNumber = position.line;
+    const lineNumber = position.line + 1;
     const columnNumber = position.character;
 
     // Get the code snippet for the current line
-    const lineText = editor.document.lineAt(lineNumber).text.trim();
+    const lineText = editor.document.lineAt(position.line).text.trim();
 
     // Get all code paths
     const codePaths = treeDataProvider.getCodePaths();
@@ -355,7 +355,7 @@ async function addToCodePath() {
 
             const newPath = treeDataProvider.createCodePath(finalName);
             treeDataProvider.addStepToPath(newPath.id, filePath, lineNumber, columnNumber, lineText);
-            vscode.window.showInformationMessage(`Added line ${lineNumber + 1} to "${finalName}"`);
+            vscode.window.showInformationMessage(`Added line ${lineNumber} to "${finalName}"`);
         }
         return;
     }
@@ -379,7 +379,7 @@ async function addToCodePath() {
     ];
 
     const selected = await vscode.window.showQuickPick<PathQuickPickItem>(items, {
-        placeHolder: `Add line ${lineNumber + 1} to which code path?`
+        placeHolder: `Add line ${lineNumber} to which code path?`
     });
 
     if (selected) {
@@ -406,10 +406,10 @@ async function addToCodePath() {
 
             const newPath = treeDataProvider.createCodePath(finalName);
             treeDataProvider.addStepToPath(newPath.id, filePath, lineNumber, columnNumber, lineText);
-            vscode.window.showInformationMessage(`Added line ${lineNumber + 1} to "${finalName}"`);
+            vscode.window.showInformationMessage(`Added line ${lineNumber} to "${finalName}"`);
         } else {
             treeDataProvider.addStepToPath(selected.pathId, filePath, lineNumber, columnNumber, lineText);
-            vscode.window.showInformationMessage(`Added line ${lineNumber + 1} to "${selected.label}"`);
+            vscode.window.showInformationMessage(`Added line ${lineNumber} to "${selected.label}"`);
         }
     }
 }
@@ -447,7 +447,7 @@ async function navigateToStep(item: PathStep) {
     const document = await vscode.workspace.openTextDocument(item.resourceUri);
     const editor = await vscode.window.showTextDocument(document);
 
-    const line = item.lineNumber;
+    const line = item.lineNumber! - 1;
     const column = item.columnNumber || 0;
     const position = new vscode.Position(line, column);
     const range = new vscode.Range(position, position);
@@ -528,7 +528,7 @@ async function nextStep() {
     }
 
     const currentFile = editor.document.uri.fsPath;
-    const currentLine = editor.selection.active.line;
+    const currentLine = editor.selection.active.line + 1;
 
     // Find current step
     const currentStep = findCurrentStep(currentFile, currentLine);
@@ -552,7 +552,7 @@ async function previousStep() {
     }
 
     const currentFile = editor.document.uri.fsPath;
-    const currentLine = editor.selection.active.line;
+    const currentLine = editor.selection.active.line + 1;
 
     // Find current step
     const currentStep = findCurrentStep(currentFile, currentLine);
@@ -824,7 +824,7 @@ async function navigateToCallNode(item: vscode.CallHierarchyItem) {
 async function addCallNodeToCodePath(node: CallNode) {
     const item = node.callItem;
     const filePath = item.uri.fsPath;
-    const lineNumber = item.selectionRange.start.line;
+    const lineNumber = item.selectionRange.start.line + 1;
     const columnNumber = item.selectionRange.start.character;
     const lineText = item.name;
 

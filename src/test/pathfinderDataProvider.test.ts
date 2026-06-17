@@ -153,4 +153,47 @@ suite('PathfinderDataProvider Test Suite', () => {
 
         assert.strictEqual(parent, undefined);
     });
+
+    test('Should migrate old 0-based line numbers to 1-based on load', () => {
+        const oldData = [{
+            label: 'Old Path',
+            id: 'old-path-1',
+            creationTime: new Date().toISOString(),
+            colorName: 'charts.blue',
+            steps: [
+                { filePath: '/test/file.ts', lineNumber: 0, columnNumber: 0, stepNumber: 1 },
+                { filePath: '/test/file.ts', lineNumber: 9, columnNumber: 5, stepNumber: 2 }
+            ]
+        }];
+        const oldMemento = new MockMemento({ 'pathfinder.codePaths': oldData });
+        const migratedProvider = new PathfinderDataProvider(oldMemento);
+
+        const paths = migratedProvider.getCodePaths();
+        assert.strictEqual(paths.length, 1);
+        assert.strictEqual(paths[0].steps[0].lineNumber, 1);
+        assert.strictEqual(paths[0].steps[1].lineNumber, 10);
+    });
+
+    test('Should not double-migrate already 1-based line numbers', () => {
+        const newData = [{
+            label: 'New Path',
+            id: 'new-path-1',
+            creationTime: new Date().toISOString(),
+            colorName: 'charts.green',
+            steps: [
+                { filePath: '/test/file.ts', lineNumber: 1, columnNumber: 0, stepNumber: 1 },
+                { filePath: '/test/file.ts', lineNumber: 56, columnNumber: 0, stepNumber: 2 }
+            ]
+        }];
+        const newMemento = new MockMemento({
+            'pathfinder.codePaths': newData,
+            'pathfinder.lineNumbers1Based': true
+        });
+        const newProvider = new PathfinderDataProvider(newMemento);
+
+        const paths = newProvider.getCodePaths();
+        assert.strictEqual(paths.length, 1);
+        assert.strictEqual(paths[0].steps[0].lineNumber, 1);
+        assert.strictEqual(paths[0].steps[1].lineNumber, 56);
+    });
 });

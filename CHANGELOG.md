@@ -2,6 +2,12 @@
 
 All notable changes to the Pathfinder extension will be documented in this file.
 
+## [0.2.11] - 2026-06-17
+
+### Fixed
+
+- **Import/export line numbers off by one**: line numbers in JSON files are now stored as 1-based (matching what editors display) instead of 0-based. Importing a file with `lineNumber: 56` now correctly shows "Line 56" and navigates to line 56. Existing workspace data is migrated automatically on first load.
+
 ## [0.2.10] - 2026-03-23
 
 ### Improved

@@ -69,7 +69,7 @@ export class CodePath extends vscode.TreeItem {
 
         // Only show path if it's useful (not just "." or empty)
         const showPath = relativePath && relativePath !== '.' && relativePath !== '';
-        item.description = `Line ${lineNumber + 1}${showPath ? ' - ' + relativePath : ''}`;
+        item.description = `Line ${lineNumber}${showPath ? ' - ' + relativePath : ''}`;
 
         item.id = `${this.id}-step-${stepNumber}`;
         item.contextValue = 'step';
