@@ -13,3 +13,6 @@ yarn-error.log*
 .env.development.local
 .env.test.local
 .env.production.local
+
+# Claude Code project settings (machine-specific tool permissions)
+.claude/
