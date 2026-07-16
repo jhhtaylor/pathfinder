@@ -2,6 +2,12 @@
 
 All notable changes to the Pathfinder extension will be documented in this file.
 
+## [0.2.12] - 2026-07-16
+
+### Fixed
+
+- **Package size**: added a missing `.vscodeignore`, so the published extension no longer bundles its TypeScript source, compiled test output, dev configs, and a local Claude Code settings file. No secrets were included in any of it, but it cut the package from ~196KB to ~76KB.
+
 ## [0.2.11] - 2026-06-17
 
 ### Fixed
