@@ -11,3 +11,7 @@ eslint.config.cjs
 **/*.ts
 **/.claude/**
 .github/**
+__azurite_db_*.json
+*pathfinder*.json
+*.vsix
+scripts/**

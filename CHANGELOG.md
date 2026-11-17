@@ -2,6 +2,36 @@
 
 All notable changes to the Pathfinder extension will be documented in this file.
 
+## [0.3.0] - 2026-11-17
+
+### Added
+
+- **Inline notes**: every step line shows its number and note at the end of the line, like Git blame annotations. Hovering shows the step's details and links to the previous and next step, the path map, and the file's changes. Toggle with `pathfinder.showInlineNotes`.
+- **Path Map**: a side panel that follows you through a code path. It names the function each step is in and labels whether it calls, or returns to, the next step, based on the language server's call hierarchy with a text-search fallback.
+- **Copy as Mermaid Diagram**: copies a code path as a Mermaid flowchart grouped by file, for PR descriptions and docs.
+- **Copy menus**: right-click a step for Copy Step With Code (a comment like `// repo - file.ts - line 42 - note` followed by the line), Copy Relative Path, Copy Relative Path With Line, Copy Path, Copy File Name, Copy File Name With Extension, Copy as @ Mention and Copy Repo Name. Right-click a code path for Copy Steps With Code, Copy File Paths and Copy as Mermaid Diagram.
+- **Step kinds**: mark a step as New, Changed, Context or Test (right-click → Set Kind..., or `"kind"` in the JSON). Each kind has its own icon and colour in the sidebar and a tag in the path map, inline note and hover. Mermaid diagrams outline new, changed and test steps in colour.
+- **Paths across repositories**: exported steps store their path relative to their Git repo plus a `repo` name taken from the `origin` remote. On import, each step is matched to the workspace folder for that repo, so one path can walk through several repos in a multi-root workspace, even when they share file names.
+- **Path colour in the path map**: the header and progress bar use the code path's colour.
+- **Review tracking**: checkboxes on steps, a reviewed count on each path, and a status bar item showing the current step that moves to the next one when clicked.
+- **Open Changes**: diffs a step's file against the merge base with the main branch (or `pathfinder.diffBase`).
+- **Path summaries and step details**: paths can carry a summary and steps a longer `detail`, shown on hover and in the path map.
+- **Import from the workspace**: the import button lists `*pathfinder*.json` files in the workspace, newest first. JSON files can also be imported from the Explorer context menu.
+
+### Changed
+
+- Import now has its own button at the top of the Code Paths view, and New Code Path uses a `+` icon so the two are easier to tell apart. An empty view shows Import and New buttons.
+- The import dialog opens in the folder of the active file instead of the workspace root.
+- Next/Previous Step continue from the last visited step when the cursor is not on a step.
+- Imports accept files with only `label` and `steps`, `{ "paths": [...] }`, or a single path object, and report which field is wrong when a file is rejected.
+
+### Fixed
+
+- **Shared files pointed at the author's machine**: exports now store workspace-relative paths, and importing an older file with absolute paths matches them to the current workspace.
+- **Re-importing duplicated paths**: importing a path with an existing `id` (or label, when there is no `id`) now replaces it.
+- **Steps drifting after edits**: when a step's line no longer matches its saved snippet, Pathfinder moves the step to the nearest line that does, both on import and when navigating.
+- Navigating to a step whose file is missing now shows an error instead of failing silently.
+
 ## [0.2.12] - 2026-07-16
 
 ### Fixed

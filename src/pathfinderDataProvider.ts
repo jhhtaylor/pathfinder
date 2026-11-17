@@ -1,13 +1,23 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
+import * as os from 'os';
 import { CodePath, PathStep } from './models/CodePath';
+import { PathData, STEP_KIND_STYLES, StepData, StepKind, findAnchoredLine, parsePathFile, resolveStepFile, toPortablePath } from './pathFile';
+import { RepoInfo, createRepoResolver } from './copyOperations';
+
+const PATH_FILE_GLOB = '**/*pathfinder*.json';
 
 export class PathfinderDataProvider implements vscode.TreeDataProvider<CodePath | PathStep>, vscode.TreeDragAndDropController<CodePath | PathStep> {
     private _onDidChangeTreeData: vscode.EventEmitter<CodePath | PathStep | undefined | null | void> = new vscode.EventEmitter<CodePath | PathStep | undefined | null | void>();
     readonly onDidChangeTreeData: vscode.Event<CodePath | PathStep | undefined | null | void> = this._onDidChangeTreeData.event;
 
+    private _onDidChangeCurrentStep = new vscode.EventEmitter<PathStep | undefined>();
+    readonly onDidChangeCurrentStep = this._onDidChangeCurrentStep.event;
+
     private codePaths: CodePath[] = [];
     private workspaceState: vscode.Memento;
+    private currentStep: PathStep | undefined;
 
     // Drag and drop support
     dropMimeTypes = ['application/vnd.code.tree.pathfinder'];
@@ -23,6 +33,21 @@ export class PathfinderDataProvider implements vscode.TreeDataProvider<CodePath 
     }
 
     getTreeItem(element: CodePath | PathStep): vscode.TreeItem {
+        if (element instanceof PathStep) {
+            const isCurrent = element === this.currentStep;
+            const kind = element.kind && STEP_KIND_STYLES[element.kind];
+            element.iconPath = isCurrent
+                ? new vscode.ThemeIcon('debug-stackframe', new vscode.ThemeColor('charts.yellow'))
+                : new vscode.ThemeIcon(kind?.icon ?? 'circle-outline', kind?.color ? new vscode.ThemeColor(kind.color) : undefined);
+            const showCheckboxes = vscode.workspace.getConfiguration('pathfinder').get<boolean>('showReviewCheckboxes', true);
+            element.checkboxState = showCheckboxes
+                ? (element.reviewed ? vscode.TreeItemCheckboxState.Checked : vscode.TreeItemCheckboxState.Unchecked)
+                : undefined;
+            element.tooltip = stepTooltip(element);
+        } else {
+            element.updateDescription();
+            element.tooltip = element.summary ? new vscode.MarkdownString(element.summary) : undefined;
+        }
         return element;
     }
 
@@ -54,6 +79,57 @@ export class PathfinderDataProvider implements vscode.TreeDataProvider<CodePath 
 
     getCodePath(id: string): CodePath | undefined {
         return this.codePaths.find(path => path.id === id);
+    }
+
+    getStep(pathId: string, stepNumber: number): PathStep | undefined {
+        return this.getCodePath(pathId)?.steps.find(s => s.stepNumber === stepNumber);
+    }
+
+    getCurrentStep(): PathStep | undefined {
+        const step = this.currentStep;
+        if (step && step.pathId && this.getCodePath(step.pathId)?.steps.includes(step)) {
+            return step;
+        }
+        return undefined;
+    }
+
+    setCurrentStep(step: PathStep | undefined) {
+        if (step === this.currentStep) {
+            return;
+        }
+        this.currentStep = step;
+        this.refresh();
+        this._onDidChangeCurrentStep.fire(step);
+    }
+
+    setStepReviewed(step: PathStep, reviewed: boolean) {
+        step.reviewed = reviewed || undefined;
+        this.saveCodePaths();
+        this.refresh();
+    }
+
+    setStepKind(step: PathStep, kind: StepKind | undefined) {
+        step.kind = kind;
+        this.saveCodePaths();
+        this.refresh();
+    }
+
+    setPathSummary(pathId: string, summary: string | undefined) {
+        const codePath = this.getCodePath(pathId);
+        if (codePath) {
+            codePath.summary = summary || undefined;
+            this.saveCodePaths();
+            this.refresh();
+        }
+    }
+
+    moveStepLine(step: PathStep, lineNumber: number) {
+        const codePath = step.pathId ? this.getCodePath(step.pathId) : undefined;
+        if (codePath && step.lineNumber !== lineNumber) {
+            codePath.setStepLine(step, lineNumber);
+            this.saveCodePaths();
+            this.refresh();
+        }
     }
 
     createCodePath(name: string): CodePath {
@@ -124,54 +200,69 @@ export class PathfinderDataProvider implements vscode.TreeDataProvider<CodePath 
         this.refresh();
     }
 
-    private saveCodePaths() {
-        const serialized = this.codePaths.map(path => ({
-            label: path.label,
-            id: path.id,
-            creationTime: path.creationTime.toISOString(),
-            colorName: path.colorName,
-            steps: path.steps.map(step => ({
-                filePath: step.resourceUri?.fsPath,
-                lineNumber: step.lineNumber,
-                columnNumber: step.columnNumber,
-                codeSnippet: step.codeSnippet,
-                stepNumber: step.stepNumber,
-                customLabel: step.customLabel
-            }))
-        }));
+    // `portable` maps an absolute path to what a shared file should store.
+    private serializePath(p: CodePath, portable?: (fsPath: string) => Pick<StepData, 'filePath' | 'repo'>): PathData {
+        return {
+            label: p.label as string,
+            id: p.id,
+            creationTime: p.creationTime.toISOString(),
+            colorName: p.colorName,
+            summary: p.summary,
+            steps: p.steps.map(step => {
+                const fsPath = step.resourceUri?.fsPath || '';
+                return {
+                    ...(portable ? portable(fsPath) : { filePath: fsPath }),
+                    kind: step.kind,
+                    lineNumber: step.lineNumber!,
+                    columnNumber: step.columnNumber,
+                    codeSnippet: step.codeSnippet,
+                    customLabel: step.customLabel,
+                    detail: step.detail,
+                    // Review progress is personal, so it stays out of shared files.
+                    reviewed: portable ? undefined : step.reviewed,
+                };
+            })
+        };
+    }
 
-        this.workspaceState.update('pathfinder.codePaths', serialized);
+    private restorePath(data: PathData, lineNumberOffset = 0): CodePath {
+        const restored = new CodePath(
+            data.label,
+            data.id || `path-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            data.creationTime ? new Date(data.creationTime) : new Date(),
+            data.colorName
+        );
+        restored.summary = data.summary;
+        for (const stepData of data.steps) {
+            if (!stepData.filePath) {
+                continue;
+            }
+            const step = restored.addStep(
+                stepData.filePath,
+                stepData.lineNumber + lineNumberOffset,
+                stepData.columnNumber || 0,
+                stepData.codeSnippet,
+                stepData.customLabel
+            );
+            if (step) {
+                step.kind = stepData.kind;
+                step.detail = stepData.detail;
+                step.reviewed = stepData.reviewed || undefined;
+            }
+        }
+        restored.updateDescription();
+        return restored;
+    }
+
+    private saveCodePaths() {
+        this.workspaceState.update('pathfinder.codePaths', this.codePaths.map(p => this.serializePath(p)));
         this.workspaceState.update('pathfinder.lineNumbers1Based', true);
     }
 
     private loadCodePaths() {
         const saved = this.workspaceState.get<any[]>('pathfinder.codePaths', []);
         const migrated = this.workspaceState.get<boolean>('pathfinder.lineNumbers1Based', false);
-        this.codePaths = saved.map(data => {
-            const path = new CodePath(
-                data.label,
-                data.id,
-                new Date(data.creationTime),
-                data.colorName
-            );
-
-            if (data.steps) {
-                data.steps.forEach((stepData: any) => {
-                    if (stepData.filePath) {
-                        const lineNumber = migrated ? stepData.lineNumber : stepData.lineNumber + 1;
-                        path.addStep(
-                            stepData.filePath,
-                            lineNumber,
-                            stepData.columnNumber || 0,
-                            stepData.codeSnippet,
-                            stepData.customLabel
-                        );
-                    }
-                });
-            }
-
-            return path;
-        });
+        this.codePaths = saved.map(data => this.restorePath({ ...data, steps: data.steps ?? [] }, migrated ? 0 : 1));
         if (!migrated && saved.length > 0) {
             this.workspaceState.update('pathfinder.lineNumbers1Based', true);
             this.saveCodePaths();
@@ -214,35 +305,37 @@ export class PathfinderDataProvider implements vscode.TreeDataProvider<CodePath 
         return path.steps[currentIndex - 1];
     }
 
-    private getImportExportDirectory(): string {
+    private workspaceRoots(): string[] {
+        return (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath);
+    }
+
+    private getConfiguredDirectory(): string | undefined {
         const configuredPath = vscode.workspace
             .getConfiguration('pathfinder')
             .get<string>('importExportDirectory', '')
             .trim();
 
         if (configuredPath === '') {
-            // No configuration - use workspace root or home directory
-            return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ||
-                require('os').homedir();
+            return undefined;
         }
-
-        // Check if path is absolute
         if (path.isAbsolute(configuredPath)) {
             return configuredPath;
         }
+        return path.resolve(this.workspaceRoots()[0] ?? os.homedir(), configuredPath);
+    }
 
-        // Relative path - resolve relative to workspace root
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        if (workspaceRoot) {
-            return path.resolve(workspaceRoot, configuredPath);
-        }
-
-        // No workspace - treat as absolute from home directory
-        return path.resolve(require('os').homedir(), configuredPath);
+    private getImportDialogDirectory(): string {
+        const active = vscode.window.activeTextEditor?.document.uri;
+        const activeDir = active?.scheme === 'file' ? path.dirname(active.fsPath) : undefined;
+        return this.getConfiguredDirectory()
+            ?? activeDir
+            ?? this.workspaceState.get<string>('pathfinder.lastImportDir')
+            ?? this.workspaceRoots()[0]
+            ?? os.homedir();
     }
 
     async exportCodePathsToFile(): Promise<void> {
-        const defaultPath = this.getImportExportDirectory();
+        const defaultPath = this.getConfiguredDirectory() ?? this.workspaceRoots()[0] ?? os.homedir();
 
         const uri = await vscode.window.showSaveDialog({
             defaultUri: vscode.Uri.file(
@@ -256,107 +349,150 @@ export class PathfinderDataProvider implements vscode.TreeDataProvider<CodePath 
             return;
         }
 
-        const serialized = this.codePaths.map(path => ({
-            label: path.label,
-            id: path.id,
-            creationTime: path.creationTime.toISOString(),
-            colorName: path.colorName,
-            steps: path.steps.map(step => ({
-                filePath: step.resourceUri?.fsPath,
-                lineNumber: step.lineNumber,
-                columnNumber: step.columnNumber,
-                codeSnippet: step.codeSnippet,
-                stepNumber: step.stepNumber,
-                customLabel: step.customLabel
-            }))
-        }));
-
-        const content = JSON.stringify(serialized, null, 2);
+        const roots = this.workspaceRoots();
+        const resolveRepo = createRepoResolver();
+        const repos = new Map<string, RepoInfo | undefined>();
+        for (const step of this.codePaths.flatMap(p => p.steps)) {
+            const fsPath = step.resourceUri?.fsPath;
+            if (fsPath && !repos.has(fsPath)) {
+                repos.set(fsPath, await resolveRepo(path.dirname(fsPath)));
+            }
+        }
+        // Paths are stored relative to their git repo, named by its remote, so a
+        // teammate with the same repos checked out anywhere can import the file.
+        const portable = (fsPath: string) => {
+            const repo = repos.get(fsPath);
+            return repo
+                ? { filePath: toPortablePath(fsPath, [repo.root]), repo: repo.name }
+                : { filePath: toPortablePath(fsPath, roots) };
+        };
+        const content = JSON.stringify(this.codePaths.map(p => this.serializePath(p, portable)), null, 2);
 
         await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf8'));
         vscode.window.showInformationMessage('Code Paths exported successfully.');
     }
 
     async importCodePathsFromFile(): Promise<void> {
-        const defaultPath = this.getImportExportDirectory();
+        const found = await vscode.workspace.findFiles(PATH_FILE_GLOB, '**/node_modules/**', 200);
+        if (found.length > 0) {
+            const withTimes = await Promise.all(found.map(async uri => {
+                try {
+                    return { uri, mtime: (await vscode.workspace.fs.stat(uri)).mtime };
+                } catch {
+                    return { uri, mtime: 0 };
+                }
+            }));
+            withTimes.sort((a, b) => b.mtime - a.mtime);
+
+            interface FileItem extends vscode.QuickPickItem { uri?: vscode.Uri; }
+            const items: FileItem[] = [
+                ...withTimes.map(({ uri, mtime }) => ({
+                    label: `$(file) ${path.basename(uri.fsPath)}`,
+                    description: path.dirname(vscode.workspace.asRelativePath(uri)),
+                    detail: mtime ? `Modified ${new Date(mtime).toLocaleString()}` : undefined,
+                    uri
+                })),
+                { label: '$(folder-opened) Browse...', alwaysShow: true }
+            ];
+            const picked = await vscode.window.showQuickPick<FileItem>(items, {
+                placeHolder: 'Import code paths from a file in this workspace'
+            });
+            if (!picked) {
+                return;
+            }
+            if (picked.uri) {
+                await this.importFromUri(picked.uri);
+                return;
+            }
+        }
 
         const [uri] =
             (await vscode.window.showOpenDialog({
                 canSelectMany: false,
                 filters: { jsonFiles: ['json'] },
                 openLabel: 'Import Code Paths',
-                defaultUri: vscode.Uri.file(defaultPath),
+                defaultUri: vscode.Uri.file(this.getImportDialogDirectory()),
             })) || [];
 
-        if (!uri) {
+        if (uri) {
+            await this.importFromUri(uri);
+        }
+    }
+
+    async importFromUri(uri: vscode.Uri): Promise<void> {
+        this.workspaceState.update('pathfinder.lastImportDir', path.dirname(uri.fsPath));
+
+        let data: PathData[];
+        try {
+            const content = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8');
+            data = parsePathFile(content);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Cannot import Code Paths: ${error instanceof Error ? error.message : error}`);
             return;
         }
 
-        const contentBytes = await vscode.workspace.fs.readFile(uri);
-        const content = contentBytes.toString();
-
-        try {
-            const importedPaths: any[] = JSON.parse(content);
-
-            // Validate structure
-            const isValid = Array.isArray(importedPaths) && importedPaths.every(pathData => {
-                return (
-                    typeof pathData.label === 'string' &&
-                    typeof pathData.id === 'string' &&
-                    typeof pathData.creationTime === 'string' &&
-                    typeof pathData.colorName === 'string' &&
-                    Array.isArray(pathData.steps) &&
-                    pathData.steps.every((step: any) =>
-                        typeof step.filePath === 'string' &&
-                        typeof step.lineNumber === 'number' &&
-                        typeof step.stepNumber === 'number'
-                    )
-                );
-            });
-
-            if (!isValid) {
-                vscode.window.showErrorMessage(
-                    'Invalid JSON structure. Import aborted.'
-                );
-                return;
+        const roots = [...this.workspaceRoots(), path.dirname(uri.fsPath)];
+        const resolveRepo = createRepoResolver();
+        const repoRoots = new Map<string, string>();
+        for (const root of roots) {
+            const repo = await resolveRepo(root);
+            if (repo && !repoRoots.has(repo.name)) {
+                repoRoots.set(repo.name, repo.root);
             }
-
-            // Import paths
-            for (const pathData of importedPaths) {
-                const newPath = new CodePath(
-                    pathData.label,
-                    pathData.id,
-                    new Date(pathData.creationTime),
-                    pathData.colorName
-                );
-
-                if (pathData.steps) {
-                    pathData.steps.forEach((stepData: any) => {
-                        if (stepData.filePath) {
-                            newPath.addStep(
-                                stepData.filePath,
-                                stepData.lineNumber,
-                                stepData.columnNumber || 0,
-                                stepData.codeSnippet,
-                                stepData.customLabel
-                            );
-                        }
-                    });
-                }
-
-                this.codePaths.push(newPath);
-            }
-
-            this.saveCodePaths();
-            this.refresh();
-            vscode.window.showInformationMessage(
-                `Imported ${importedPaths.length} Code Path${importedPaths.length === 1 ? '' : 's'} successfully.`
-            );
-        } catch (error) {
-            vscode.window.showErrorMessage(
-                'Cannot import Code Paths. Invalid JSON file.'
-            );
         }
+        const { added, replaced } = this.addImportedPaths(data, roots, repoRoots);
+        const total = added + replaced;
+        vscode.window.showInformationMessage(
+            `Imported ${total} Code Path${total === 1 ? '' : 's'}${replaced ? ` (${replaced} replaced)` : ''}.`
+        );
+    }
+
+    addImportedPaths(data: PathData[], roots: string[], repoRoots = new Map<string, string>()): { added: number; replaced: number } {
+        let added = 0;
+        let replaced = 0;
+        const fileLines = new Map<string, string[] | undefined>();
+        const readLines = (file: string) => {
+            if (!fileLines.has(file)) {
+                try {
+                    fileLines.set(file, fs.readFileSync(file, 'utf8').split(/\r?\n/));
+                } catch {
+                    fileLines.set(file, undefined);
+                }
+            }
+            return fileLines.get(file);
+        };
+
+        for (const pathData of data) {
+            const steps = pathData.steps.map(s => {
+                const repoRoot = s.repo ? repoRoots.get(s.repo) : undefined;
+                const filePath = resolveStepFile(s.filePath, repoRoot ? [repoRoot, ...roots] : roots, fs.existsSync);
+                const lines = readLines(filePath);
+                if (!lines) {
+                    return { ...s, filePath };
+                }
+                const lineNumber = findAnchoredLine(lines, s.lineNumber, s.codeSnippet);
+                const codeSnippet = s.codeSnippet ?? lines[lineNumber - 1]?.trim();
+                return { ...s, filePath, lineNumber, codeSnippet };
+            });
+            const restored = this.restorePath({ ...pathData, steps });
+
+            const existingIndex = this.codePaths.findIndex(p =>
+                pathData.id ? p.id === pathData.id : p.label === pathData.label
+            );
+            if (existingIndex !== -1) {
+                restored.id = this.codePaths[existingIndex].id;
+                restored.steps.forEach(s => { s.pathId = restored.id; s.id = `${restored.id}-step-${s.stepNumber}`; });
+                this.codePaths[existingIndex] = restored;
+                replaced++;
+            } else {
+                this.codePaths.push(restored);
+                added++;
+            }
+        }
+
+        this.saveCodePaths();
+        this.refresh();
+        return { added, replaced };
     }
 
     // Drag and Drop implementation
@@ -462,4 +598,23 @@ export class PathfinderDataProvider implements vscode.TreeDataProvider<CodePath 
         this.saveCodePaths();
         this.refresh();
     }
+}
+
+function stepTooltip(step: PathStep): vscode.MarkdownString {
+    const md = new vscode.MarkdownString();
+    md.appendMarkdown(`**Step ${step.stepNumber}** · \`${path.basename(step.resourceUri?.fsPath || '')}:${step.lineNumber}\``);
+    if (step.kind) {
+        md.appendMarkdown(` · ${STEP_KIND_STYLES[step.kind].label}`);
+    }
+    if (step.customLabel) {
+        md.appendMarkdown(`\n\n${step.customLabel}`);
+    }
+    if (step.detail) {
+        md.appendMarkdown(`\n\n${step.detail}`);
+    }
+    if (step.codeSnippet) {
+        md.appendMarkdown('\n\n');
+        md.appendCodeblock(step.codeSnippet);
+    }
+    return md;
 }

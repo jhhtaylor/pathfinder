@@ -16,3 +16,4 @@ yarn-error.log*
 
 # Claude Code project settings (machine-specific tool permissions)
 .claude/
+__azurite_db_*.json

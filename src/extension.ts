@@ -3,6 +3,11 @@ import { PathfinderDataProvider } from './pathfinderDataProvider';
 import { CodePath, PathStep } from './models/CodePath';
 import { CallHierarchyProvider, isInWorkspace } from './callHierarchyProvider';
 import { CallNode, CallDepth } from './models/CallNode';
+import { StepAnnotations } from './stepAnnotations';
+import { PathMapPanel, copyPathAsMermaid } from './pathMap';
+import { openStepChanges } from './stepChanges';
+import { STEP_KINDS, STEP_KIND_STYLES, StepKind, findAnchoredLine } from './pathFile';
+import { registerCopyCommands } from './copyOperations';
 
 let treeDataProvider: PathfinderDataProvider;
 let currentStepDecorationType: vscode.TextEditorDecorationType;
@@ -31,8 +36,19 @@ export function activate(context: vscode.ExtensionContext) {
     const treeView = vscode.window.createTreeView('pathfinder', {
         treeDataProvider: treeDataProvider,
         showCollapseAll: false,
-        dragAndDropController: treeDataProvider
+        dragAndDropController: treeDataProvider,
+        manageCheckboxStateManually: true
     });
+
+    context.subscriptions.push(
+        treeView.onDidChangeCheckboxState(e => {
+            for (const [item, state] of e.items) {
+                if (item instanceof PathStep) {
+                    treeDataProvider.setStepReviewed(item, state === vscode.TreeItemCheckboxState.Checked);
+                }
+            }
+        })
+    );
 
     // Track manual expand/collapse to update the icon
     context.subscriptions.push(
@@ -262,8 +278,99 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('pathfinder.collapseAll', () => collapseAll(treeView, updateCollapsedContext)),
         vscode.commands.registerCommand('pathfinder.expandAll', () => expandAll(treeView, updateCollapsedContext)),
         vscode.commands.registerCommand('pathfinder.showMoreOptions', showMoreOptions),
+        vscode.commands.registerCommand('pathfinder.importFromExplorer', (uri: vscode.Uri) => treeDataProvider.importFromUri(uri)),
+        vscode.commands.registerCommand('pathfinder.goToStep', (pathId: string, stepNumber: number) => {
+            const step = treeDataProvider.getStep(pathId, stepNumber);
+            return step && navigateToStep(step);
+        }),
+        vscode.commands.registerCommand('pathfinder.toggleStepReviewed', (pathId: string, stepNumber: number) => {
+            const step = treeDataProvider.getStep(pathId, stepNumber);
+            if (step) {
+                treeDataProvider.setStepReviewed(step, !step.reviewed);
+            }
+        }),
+        vscode.commands.registerCommand('pathfinder.openStepChanges', (target: PathStep | string, stepNumber?: number) => {
+            const step = target instanceof PathStep ? target : treeDataProvider.getStep(target, stepNumber!);
+            return step && openStepChanges(step);
+        }),
+        vscode.commands.registerCommand('pathfinder.showPathMap', (target?: CodePath | string) => {
+            const pathId = target instanceof CodePath ? target.id
+                : target ?? treeDataProvider.getCurrentStep()?.pathId ?? treeDataProvider.getCodePaths()[0]?.id;
+            if (!pathId) {
+                vscode.window.showInformationMessage('Create or import a code path first.');
+                return;
+            }
+            PathMapPanel.show(treeDataProvider, pathId);
+        }),
+        vscode.commands.registerCommand('pathfinder.copyAsMermaid', (item?: CodePath) => {
+            const codePath = item ?? treeDataProvider.getCodePath(treeDataProvider.getCurrentStep()?.pathId ?? '')
+                ?? treeDataProvider.getCodePaths()[0];
+            return codePath && copyPathAsMermaid(codePath);
+        }),
+        vscode.commands.registerCommand('pathfinder.editPathSummary', editPathSummary),
+        vscode.commands.registerCommand('pathfinder.setStepKind', setStepKind),
+        new StepAnnotations(treeDataProvider),
         treeView
     );
+
+    registerCopyCommands(context);
+
+    const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
+    statusBar.command = 'pathfinder.nextStep';
+    const updateStatusBar = () => {
+        const step = treeDataProvider.getCurrentStep();
+        const codePath = step && treeDataProvider.getPathForStep(step);
+        if (!step || !codePath) {
+            statusBar.hide();
+            return;
+        }
+        const reviewed = codePath.steps.filter(s => s.reviewed).length;
+        statusBar.text = `$(location) ${codePath.label} · ${step.stepNumber}/${codePath.steps.length}`;
+        statusBar.tooltip = `Pathfinder: step ${step.stepNumber} of ${codePath.steps.length}`
+            + (reviewed ? `, ${reviewed} reviewed` : '') + '. Click for the next step.';
+        statusBar.show();
+    };
+    context.subscriptions.push(
+        statusBar,
+        treeDataProvider.onDidChangeTreeData(updateStatusBar),
+        treeDataProvider.onDidChangeCurrentStep(step => {
+            if (step && treeView.visible) {
+                treeView.reveal(step, { select: false, focus: false }).then(undefined, () => undefined);
+            }
+        }),
+        vscode.window.onDidChangeTextEditorSelection(e => {
+            const step = findCurrentStep(e.textEditor.document.uri.fsPath, e.selections[0].active.line + 1);
+            if (step) {
+                treeDataProvider.setCurrentStep(step);
+            }
+        })
+    );
+}
+
+async function setStepKind(step: PathStep) {
+    interface KindItem extends vscode.QuickPickItem { stepKind?: StepKind; }
+    const items: KindItem[] = [
+        ...STEP_KINDS.map(kind => ({
+            label: `$(${STEP_KIND_STYLES[kind].icon}) ${STEP_KIND_STYLES[kind].label}`,
+            description: STEP_KIND_STYLES[kind].description + (step.kind === kind ? ' (current)' : ''),
+            stepKind: kind
+        })),
+        { label: '$(close) None', description: step.kind ? '' : '(current)' }
+    ];
+    const picked = await vscode.window.showQuickPick<KindItem>(items, { placeHolder: `Kind for step ${step.stepNumber}` });
+    if (picked) {
+        treeDataProvider.setStepKind(step, picked.stepKind);
+    }
+}
+
+async function editPathSummary(item: CodePath) {
+    const summary = await vscode.window.showInputBox({
+        prompt: 'What does this code path cover, and why? Shown at the top of the path map and on hover.',
+        value: item.summary ?? ''
+    });
+    if (summary !== undefined) {
+        treeDataProvider.setPathSummary(item.id, summary.trim());
+    }
 }
 
 function getDefaultPathName(): string {
@@ -444,10 +551,23 @@ async function navigateToStep(item: PathStep) {
         return;
     }
 
-    const document = await vscode.workspace.openTextDocument(item.resourceUri);
+    let document: vscode.TextDocument;
+    try {
+        document = await vscode.workspace.openTextDocument(item.resourceUri);
+    } catch {
+        vscode.window.showErrorMessage(`File not found: ${vscode.workspace.asRelativePath(item.resourceUri)}`);
+        return;
+    }
+
+    // Follow the step if code has moved since it was recorded.
+    const lines = document.getText().split(/\r?\n/);
+    const anchored = findAnchoredLine(lines, item.lineNumber, item.codeSnippet);
+    treeDataProvider.moveStepLine(item, anchored);
+    treeDataProvider.setCurrentStep(item);
+
     const editor = await vscode.window.showTextDocument(document);
 
-    const line = item.lineNumber! - 1;
+    const line = Math.min(item.lineNumber! - 1, document.lineCount - 1);
     const column = item.columnNumber || 0;
     const position = new vscode.Position(line, column);
     const range = new vscode.Range(position, position);
@@ -522,16 +642,7 @@ async function removeStep(item: PathStep) {
 }
 
 async function nextStep() {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor) {
-        return;
-    }
-
-    const currentFile = editor.document.uri.fsPath;
-    const currentLine = editor.selection.active.line + 1;
-
-    // Find current step
-    const currentStep = findCurrentStep(currentFile, currentLine);
+    const currentStep = stepAtCursor() ?? treeDataProvider.getCurrentStep();
     if (!currentStep) {
         vscode.window.showInformationMessage('Not currently at a step in any code path');
         return;
@@ -546,16 +657,7 @@ async function nextStep() {
 }
 
 async function previousStep() {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor) {
-        return;
-    }
-
-    const currentFile = editor.document.uri.fsPath;
-    const currentLine = editor.selection.active.line + 1;
-
-    // Find current step
-    const currentStep = findCurrentStep(currentFile, currentLine);
+    const currentStep = stepAtCursor() ?? treeDataProvider.getCurrentStep();
     if (!currentStep) {
         vscode.window.showInformationMessage('Not currently at a step in any code path');
         return;
@@ -569,16 +671,18 @@ async function previousStep() {
     }
 }
 
+// The status bar and path map can trigger next/previous without a text editor focused.
+function stepAtCursor(): PathStep | undefined {
+    const editor = vscode.window.activeTextEditor;
+    return editor && findCurrentStep(editor.document.uri.fsPath, editor.selection.active.line + 1);
+}
+
 function findCurrentStep(filePath: string, lineNumber: number): PathStep | undefined {
-    const codePaths = treeDataProvider.getCodePaths();
-    for (const path of codePaths) {
-        for (const step of path.steps) {
-            if (step.resourceUri?.fsPath === filePath && step.lineNumber === lineNumber) {
-                return step;
-            }
-        }
-    }
-    return undefined;
+    const currentPathId = treeDataProvider.getCurrentStep()?.pathId;
+    const matches = treeDataProvider.getCodePaths()
+        .flatMap(p => p.steps)
+        .filter(step => step.resourceUri?.fsPath === filePath && step.lineNumber === lineNumber);
+    return matches.find(step => step.pathId === currentPathId) ?? matches[0];
 }
 
 async function playPath(item: CodePath) {

@@ -19,7 +19,7 @@
     "color": "#FF914D",
     "theme": "dark"
   },
-  "version": "0.2.12",
+  "version": "0.3.0",
   "engines": {
     "vscode": "^1.99.0"
   },
@@ -49,7 +49,7 @@
         "command": "pathfinder.createNewPath",
         "category": "Pathfinder",
         "title": "Create New Code Path",
-        "icon": "$(new-folder)"
+        "icon": "$(add)"
       },
       {
         "command": "pathfinder.deletePath",
@@ -127,7 +127,7 @@
         "command": "pathfinder.importCodePaths",
         "category": "Pathfinder",
         "title": "Import Code Paths...",
-        "icon": "$(arrow-down)"
+        "icon": "$(desktop-download)"
       },
       {
         "command": "pathfinder.collapseAll",
@@ -187,6 +187,102 @@
         "command": "pathfinder.callHierarchy.debugDump",
         "category": "Pathfinder",
         "title": "Call Hierarchy: Debug Dump"
+      },
+      {
+        "command": "pathfinder.importFromExplorer",
+        "category": "Pathfinder",
+        "title": "Import into Pathfinder"
+      },
+      {
+        "command": "pathfinder.goToStep",
+        "category": "Pathfinder",
+        "title": "Go to Step"
+      },
+      {
+        "command": "pathfinder.toggleStepReviewed",
+        "category": "Pathfinder",
+        "title": "Toggle Step Reviewed",
+        "icon": "$(check)"
+      },
+      {
+        "command": "pathfinder.openStepChanges",
+        "category": "Pathfinder",
+        "title": "Open Changes",
+        "icon": "$(git-compare)"
+      },
+      {
+        "command": "pathfinder.showPathMap",
+        "category": "Pathfinder",
+        "title": "Show Path Map",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "pathfinder.copyAsMermaid",
+        "category": "Pathfinder",
+        "title": "Copy as Mermaid Diagram",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "pathfinder.editPathSummary",
+        "category": "Pathfinder",
+        "title": "Edit Summary...",
+        "icon": "$(note)"
+      },
+      {
+        "command": "pathfinder.copyStepWithCode",
+        "category": "Pathfinder",
+        "title": "Copy Step With Code"
+      },
+      {
+        "command": "pathfinder.copyRelativePath",
+        "category": "Pathfinder",
+        "title": "Copy Relative Path"
+      },
+      {
+        "command": "pathfinder.copyRelativePathWithLine",
+        "category": "Pathfinder",
+        "title": "Copy Relative Path With Line"
+      },
+      {
+        "command": "pathfinder.copyPath",
+        "category": "Pathfinder",
+        "title": "Copy Path"
+      },
+      {
+        "command": "pathfinder.copyFileName",
+        "category": "Pathfinder",
+        "title": "Copy File Name"
+      },
+      {
+        "command": "pathfinder.copyFileNameWithExtension",
+        "category": "Pathfinder",
+        "title": "Copy File Name With Extension"
+      },
+      {
+        "command": "pathfinder.copyAtMention",
+        "category": "Pathfinder",
+        "title": "Copy as @ Mention"
+      },
+      {
+        "command": "pathfinder.copyRepoName",
+        "category": "Pathfinder",
+        "title": "Copy Repo Name"
+      },
+      {
+        "command": "pathfinder.copyPathStepsWithCode",
+        "category": "Pathfinder",
+        "title": "Copy Steps With Code"
+      },
+      {
+        "command": "pathfinder.copyPathFilePaths",
+        "category": "Pathfinder",
+        "title": "Copy File Paths"
+      },
+      {
+        "command": "pathfinder.setStepKind",
+        "category": "Pathfinder",
+        "title": "Set Kind...",
+        "icon": "$(tag)"
       }
     ],
     "viewsContainers": {
@@ -213,24 +309,29 @@
     "menus": {
       "view/title": [
         {
-          "command": "pathfinder.createNewPath",
+          "command": "pathfinder.importCodePaths",
           "when": "view == pathfinder",
           "group": "navigation@0"
         },
         {
+          "command": "pathfinder.createNewPath",
+          "when": "view == pathfinder",
+          "group": "navigation@1"
+        },
+        {
           "command": "pathfinder.collapseAll",
           "when": "view == pathfinder && !pathfinder:allCollapsed",
-          "group": "navigation@1"
+          "group": "navigation@2"
         },
         {
           "command": "pathfinder.expandAll",
           "when": "view == pathfinder && pathfinder:allCollapsed",
-          "group": "navigation@1"
+          "group": "navigation@2"
         },
         {
           "command": "pathfinder.showMoreOptions",
           "when": "view == pathfinder",
-          "group": "navigation@2"
+          "group": "navigation@3"
         },
         {
           "command": "pathfinder.callHierarchy.setDepth3",
@@ -258,32 +359,32 @@
         {
           "command": "pathfinder.renamePath",
           "when": "view == pathfinder && viewItem == path",
-          "group": "inline@0"
+          "group": "inline@1"
         },
         {
           "command": "pathfinder.playPath",
           "when": "view == pathfinder && viewItem == path && !pathfinder:isPlaying",
-          "group": "inline@1"
+          "group": "inline@2"
         },
         {
           "command": "pathfinder.pausePlayPath",
           "when": "view == pathfinder && pathfinder:isPlaying && !pathfinder:isPaused",
-          "group": "inline@1"
+          "group": "inline@2"
         },
         {
           "command": "pathfinder.resumePlayPath",
           "when": "view == pathfinder && pathfinder:isPlaying && pathfinder:isPaused",
-          "group": "inline@1"
+          "group": "inline@2"
         },
         {
           "command": "pathfinder.stopPlayPath",
           "when": "view == pathfinder && pathfinder:isPlaying",
-          "group": "inline@1"
+          "group": "inline@2"
         },
         {
           "command": "pathfinder.deletePath",
           "when": "view == pathfinder && viewItem == path",
-          "group": "inline@2"
+          "group": "inline@3"
         },
         {
           "command": "pathfinder.navigateToStep",
@@ -319,6 +420,41 @@
           "command": "pathfinder.callHierarchy.addToCodePath",
           "when": "view == pathfinderCallHierarchy && (viewItem == callNodeRoot || viewItem == callNode)",
           "group": "callhierarchy@1"
+        },
+        {
+          "command": "pathfinder.showPathMap",
+          "when": "view == pathfinder && viewItem == path",
+          "group": "inline@0"
+        },
+        {
+          "command": "pathfinder.editPathSummary",
+          "when": "view == pathfinder && viewItem == path",
+          "group": "pathactions@0"
+        },
+        {
+          "command": "pathfinder.showPathMap",
+          "when": "view == pathfinder && viewItem == path",
+          "group": "pathactions@1"
+        },
+        {
+          "command": "pathfinder.setStepKind",
+          "when": "view == pathfinder && viewItem == step",
+          "group": "stepactions@1"
+        },
+        {
+          "command": "pathfinder.openStepChanges",
+          "when": "view == pathfinder && viewItem == step",
+          "group": "stepactions@2"
+        },
+        {
+          "submenu": "pathfinder.stepCopy",
+          "when": "view == pathfinder && viewItem == step",
+          "group": "stepcopy@0"
+        },
+        {
+          "submenu": "pathfinder.pathCopy",
+          "when": "view == pathfinder && viewItem == path",
+          "group": "pathcopy@0"
         }
       ],
       "commandPalette": [
@@ -407,6 +543,131 @@
         },
         {
           "command": "pathfinder.callHierarchy.debugDump"
+        },
+        {
+          "command": "pathfinder.importFromExplorer",
+          "when": "false"
+        },
+        {
+          "command": "pathfinder.goToStep",
+          "when": "false"
+        },
+        {
+          "command": "pathfinder.toggleStepReviewed",
+          "when": "false"
+        },
+        {
+          "command": "pathfinder.openStepChanges",
+          "when": "false"
+        },
+        {
+          "command": "pathfinder.editPathSummary",
+          "when": "false"
+        },
+        {
+          "command": "pathfinder.showPathMap"
+        },
+        {
+          "command": "pathfinder.copyAsMermaid"
+        },
+        {
+          "command": "pathfinder.copyStepWithCode",
+          "when": "false"
+        },
+        {
+          "command": "pathfinder.copyRelativePath",
+          "when": "false"
+        },
+        {
+          "command": "pathfinder.copyRelativePathWithLine",
+          "when": "false"
+        },
+        {
+          "command": "pathfinder.copyPath",
+          "when": "false"
+        },
+        {
+          "command": "pathfinder.copyFileName",
+          "when": "false"
+        },
+        {
+          "command": "pathfinder.copyFileNameWithExtension",
+          "when": "false"
+        },
+        {
+          "command": "pathfinder.copyAtMention",
+          "when": "false"
+        },
+        {
+          "command": "pathfinder.copyRepoName",
+          "when": "false"
+        },
+        {
+          "command": "pathfinder.copyPathStepsWithCode",
+          "when": "false"
+        },
+        {
+          "command": "pathfinder.copyPathFilePaths",
+          "when": "false"
+        },
+        {
+          "command": "pathfinder.setStepKind",
+          "when": "false"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "pathfinder.importFromExplorer",
+          "when": "resourceExtname == .json",
+          "group": "pathfinder@1"
+        }
+      ],
+      "pathfinder.stepCopy": [
+        {
+          "command": "pathfinder.copyStepWithCode",
+          "group": "1_code@0"
+        },
+        {
+          "command": "pathfinder.copyRelativePath",
+          "group": "2_path@0"
+        },
+        {
+          "command": "pathfinder.copyRelativePathWithLine",
+          "group": "2_path@1"
+        },
+        {
+          "command": "pathfinder.copyPath",
+          "group": "2_path@2"
+        },
+        {
+          "command": "pathfinder.copyFileName",
+          "group": "3_name@0"
+        },
+        {
+          "command": "pathfinder.copyFileNameWithExtension",
+          "group": "3_name@1"
+        },
+        {
+          "command": "pathfinder.copyAtMention",
+          "group": "4_mention@0"
+        },
+        {
+          "command": "pathfinder.copyRepoName",
+          "group": "5_repo@0"
+        }
+      ],
+      "pathfinder.pathCopy": [
+        {
+          "command": "pathfinder.copyPathStepsWithCode",
+          "group": "1_code@0"
+        },
+        {
+          "command": "pathfinder.copyPathFilePaths",
+          "group": "2_path@0"
+        },
+        {
+          "command": "pathfinder.copyAsMermaid",
+          "group": "3_diagram@0"
         }
       ]
     },
@@ -440,7 +701,7 @@
         "pathfinder.importExportDirectory": {
           "type": "string",
           "default": "",
-          "description": "Directory for importing/exporting code paths. Can be absolute or relative to workspace root. Leave empty to use default."
+          "description": "Directory for importing/exporting code paths. Can be absolute or relative to workspace root. When empty, the import dialog opens in the folder of the active file and export defaults to the workspace root."
         },
         "pathfinder.promptForName": {
           "type": "boolean",
@@ -451,9 +712,40 @@
           "type": "boolean",
           "default": true,
           "description": "In the Call Hierarchy view, hide methods that live outside the workspace (e.g. npm packages, SDK standard library calls). Disable to show all outgoing calls including third-party code."
+        },
+        "pathfinder.showInlineNotes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show each step's number and note at the end of its line in the editor, with a hover for details and navigation."
+        },
+        "pathfinder.showReviewCheckboxes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a checkbox on each step in the Code Paths view to track which steps you have reviewed."
+        },
+        "pathfinder.diffBase": {
+          "type": "string",
+          "default": "",
+          "description": "Git ref that Open Changes compares a step's file against. When empty, the merge base of HEAD with origin/main, origin/master, main or master is used, falling back to HEAD."
         }
       }
-    }
+    },
+    "viewsWelcome": [
+      {
+        "view": "pathfinder",
+        "contents": "No code paths yet.\n[$(desktop-download) Import Code Paths](command:pathfinder.importCodePaths)\n[$(add) New Code Path](command:pathfinder.createNewPath)\nOr right-click a line in the editor and choose Add to Code Path."
+      }
+    ],
+    "submenus": [
+      {
+        "id": "pathfinder.stepCopy",
+        "label": "Copy"
+      },
+      {
+        "id": "pathfinder.pathCopy",
+        "label": "Copy"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
@@ -475,7 +767,7 @@
     "@types/vscode": "^1.99.0",
     "@typescript-eslint/eslint-plugin": "^8.38.0",
     "@typescript-eslint/parser": "^8.33.1",
-    "@vscode/test-electron": "^2.4.1",
+    "@vscode/test-electron": "^3.1.0",
     "eslint": "^9.30.1",
     "glob": "^13.0.0",
     "mocha": "^11.7.5",

@@ -1,11 +1,13 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { StepKind } from '../pathFile';
 
 export class CodePath extends vscode.TreeItem {
     steps: PathStep[] = [];
     id: string;
     creationTime: Date;
     colorName: string;
+    summary?: string;
 
     constructor(
         label: string,
@@ -37,7 +39,9 @@ export class CodePath extends vscode.TreeItem {
 
     updateDescription() {
         const stepCount = this.steps.length;
-        this.description = stepCount === 1 ? '1 step' : `${stepCount} steps`;
+        const reviewed = this.steps.filter(s => s.reviewed).length;
+        const base = stepCount === 1 ? '1 step' : `${stepCount} steps`;
+        this.description = reviewed > 0 ? `${base} · ${reviewed}/${stepCount} reviewed` : base;
     }
 
     static stepDisplayLabel(stepNumber: number, filePath: string, customLabel?: string): string {
@@ -109,13 +113,22 @@ export class CodePath extends vscode.TreeItem {
         columnNumber: number = 0,
         codeSnippet?: string,
         customLabel?: string
-    ) {
+    ): PathStep | undefined {
         if (!filePath) {
             vscode.window.showErrorMessage('Cannot interpret file path.');
-            return;
+            return undefined;
         }
-        this.steps.push(this.createPathStep(filePath, lineNumber, columnNumber, codeSnippet, customLabel));
+        const step = this.createPathStep(filePath, lineNumber, columnNumber, codeSnippet, customLabel);
+        this.steps.push(step);
         this.updateDescription();
+        return step;
+    }
+
+    setStepLine(step: PathStep, lineNumber: number) {
+        step.lineNumber = lineNumber;
+        const relativePath = this.getRelativePath(step.resourceUri?.fsPath || '');
+        const showPath = relativePath && relativePath !== '.' && relativePath !== '';
+        step.description = `Line ${lineNumber}${showPath ? ' - ' + relativePath : ''}`;
     }
 
     removeStep(stepNumber: number) {
@@ -144,4 +157,7 @@ export class PathStep extends vscode.TreeItem {
     codeSnippet?: string;
     stepNumber?: number;
     customLabel?: string;
+    detail?: string;
+    reviewed?: boolean;
+    kind?: StepKind;
 }
