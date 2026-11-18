@@ -27,6 +27,17 @@ const CALLABLE_KINDS = new Set([
 const analysisCache = new Map<string, { signature: string; infos: StepInfo[] }>();
 const inFlight = new Map<string, Promise<StepInfo[]>>();
 
+// Language servers can stall (still indexing, or busy), so no single lookup may hold up the map or a copy.
+const PROVIDER_TIMEOUT_MS = 2000;
+const COPY_TIMEOUT_MS = 4000;
+
+function withTimeout<T>(promise: Thenable<T>, ms: number): Promise<T | undefined> {
+    return Promise.race([
+        Promise.resolve(promise),
+        new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), ms))
+    ]);
+}
+
 function signatureOf(codePath: CodePath): string {
     return codePath.steps.map(s => `${s.resourceUri?.fsPath}:${s.lineNumber}`).join('|');
 }
@@ -61,7 +72,10 @@ async function runAnalysis(codePath: CodePath): Promise<StepInfo[]> {
         infos.push(info);
     }
 
-    analysisCache.set(codePath.id, { signature: signatureOf(codePath), infos });
+    // No symbols at all usually means the language server was not ready; try again next time.
+    if (symbols.some(Boolean)) {
+        analysisCache.set(codePath.id, { signature: signatureOf(codePath), infos });
+    }
     return infos;
 }
 
@@ -73,9 +87,9 @@ async function enclosingSymbol(step: PathStep, cache: Map<string, vscode.Documen
     const key = uri.toString();
     if (!cache.has(key)) {
         try {
-            const result = await vscode.commands.executeCommand<(vscode.DocumentSymbol | vscode.SymbolInformation)[]>(
+            const result = await withTimeout(vscode.commands.executeCommand<(vscode.DocumentSymbol | vscode.SymbolInformation)[]>(
                 'vscode.executeDocumentSymbolProvider', uri
-            );
+            ), PROVIDER_TIMEOUT_MS);
             cache.set(key, (result ?? []).filter((s): s is vscode.DocumentSymbol => 'children' in s));
         } catch {
             cache.set(key, []);
@@ -120,13 +134,13 @@ async function edgeBetween(a: EnclosingSymbol | undefined, b: EnclosingSymbol | 
 
 async function calls(from: EnclosingSymbol, to: EnclosingSymbol): Promise<boolean> {
     try {
-        const items = await vscode.commands.executeCommand<vscode.CallHierarchyItem[]>(
+        const items = await withTimeout(vscode.commands.executeCommand<vscode.CallHierarchyItem[]>(
             'vscode.prepareCallHierarchy', from.uri, from.selectionRange.start
-        );
+        ), PROVIDER_TIMEOUT_MS);
         if (items && items.length > 0) {
-            const outgoing = await vscode.commands.executeCommand<vscode.CallHierarchyOutgoingCall[]>(
+            const outgoing = await withTimeout(vscode.commands.executeCommand<vscode.CallHierarchyOutgoingCall[]>(
                 'vscode.provideOutgoingCalls', items[0]
-            );
+            ), PROVIDER_TIMEOUT_MS);
             if (outgoing?.some(c => c.to.uri.toString() === to.uri.toString() && to.range.contains(c.to.selectionRange.start))) {
                 return true;
             }
@@ -211,7 +225,7 @@ export function toMermaid(codePath: CodePath, infos: StepInfo[], fileOf: (step: 
 export async function copyPathAsMermaid(codePath: CodePath) {
     const infos = await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Window, title: 'Pathfinder: analysing code path' },
-        () => analyzePath(codePath)
+        async () => (await withTimeout(analyzePath(codePath), COPY_TIMEOUT_MS)) ?? getCachedAnalysis(codePath) ?? []
     );
     await vscode.env.clipboard.writeText(toMermaid(codePath, infos));
     vscode.window.showInformationMessage(`Copied "${codePath.label}" as a Mermaid diagram.`);
@@ -380,8 +394,19 @@ function shellHtml(): string {
     next: 'then'
   })[kind] || '';
 
+  // Handlers live on the document because a re-render can swap the tile between press and release.
+  document.addEventListener('mouseup', e => {
+    if (e.button !== 0) return;
+    if (e.target.closest('#mermaid')) { vscode.postMessage({ type: 'mermaid' }); return; }
+    const node = e.target.closest('.node');
+    if (node) vscode.postMessage({ type: 'open', stepNumber: Number(node.dataset.step) });
+  });
+  let lastModel = '';
   window.addEventListener('message', ({ data }) => {
     if (data.type !== 'render') return;
+    const json = JSON.stringify(data.model);
+    if (json === lastModel) return;
+    lastModel = json;
     const m = data.model;
     if (!m) { root.innerHTML = '<p class="empty">This code path no longer exists.</p>'; return; }
     const total = m.steps.length;
@@ -412,9 +437,6 @@ function shellHtml(): string {
     if (m.color) document.documentElement.style.setProperty('--path-color', 'var(' + m.color + ')');
     else document.documentElement.style.removeProperty('--path-color');
     document.getElementById('progress').style.width = (total ? (position / total) * 100 : 0) + '%';
-    root.querySelectorAll('.node').forEach(el => el.addEventListener('click', () =>
-      vscode.postMessage({ type: 'open', stepNumber: Number(el.dataset.step) })));
-    document.getElementById('mermaid').addEventListener('click', () => vscode.postMessage({ type: 'mermaid' }));
     const cur = root.querySelector('.node.current');
     if (cur) cur.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   });

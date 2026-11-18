@@ -2,6 +2,14 @@
 
 All notable changes to the Pathfinder extension will be documented in this file.
 
+## [0.3.2] - 2026-11-18
+
+### Fixed
+
+- Clicks in the path map are no longer lost when the map refreshes mid-click, which could happen while call analysis finished.
+- Copy as Mermaid no longer waits forever on a slow or stalled language server. It copies after at most a few seconds, with whatever symbols are known.
+- The path map retries call analysis when the language server returned nothing, instead of caching the empty result.
+
 ## [0.3.1] - 2026-11-18
 
 ### Fixed
