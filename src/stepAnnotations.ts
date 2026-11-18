@@ -57,10 +57,11 @@ export class StepAnnotations implements vscode.Disposable {
 
             if (enabled) {
                 const byLine = new Map<number, { path: CodePath; step: PathStep }[]>();
-                const fsPath = editor.document.uri.fsPath;
+                // Compare whole URIs: the base side of a diff has the same fsPath under the git: scheme.
+                const uri = editor.document.uri.toString();
                 for (const path of this.provider.getCodePaths()) {
                     for (const step of path.steps) {
-                        if (step.resourceUri?.fsPath === fsPath && step.lineNumber !== undefined
+                        if (step.resourceUri?.toString() === uri && step.lineNumber !== undefined
                             && step.lineNumber <= editor.document.lineCount) {
                             const list = byLine.get(step.lineNumber) ?? [];
                             list.push({ path, step });

@@ -2,6 +2,16 @@
 
 All notable changes to the Pathfinder extension will be documented in this file.
 
+## [0.3.3] - 2026-11-18
+
+### Fixed
+
+- Inline step notes no longer show on the old side of a diff. That side is the same file under git, and the notes were landing on the wrong lines.
+
+### Changed
+
+- The README has a demo GIF.
+
 ## [0.3.2] - 2026-11-18
 
 ### Fixed
