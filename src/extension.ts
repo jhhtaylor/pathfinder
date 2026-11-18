@@ -546,6 +546,25 @@ async function renamePath(item: CodePath) {
     }
 }
 
+// Reuse a group that already has the file open, and never open steps over the path map.
+function stepColumn(uri: vscode.Uri): vscode.ViewColumn | undefined {
+    const mapColumn = PathMapPanel.visibleColumn();
+    const visible = vscode.window.visibleTextEditors.find(e => e.document.uri.toString() === uri.toString() && e.viewColumn !== mapColumn);
+    if (visible) {
+        return visible.viewColumn;
+    }
+    const groups = vscode.window.tabGroups.all.filter(g => g.viewColumn !== mapColumn);
+    const withTab = groups.find(g => g.tabs.some(t => t.input instanceof vscode.TabInputText && t.input.uri.toString() === uri.toString()));
+    if (withTab) {
+        return withTab.viewColumn;
+    }
+    if (mapColumn === undefined || vscode.window.tabGroups.activeTabGroup.viewColumn !== mapColumn) {
+        return undefined;
+    }
+    const left = groups.filter(g => g.viewColumn < mapColumn).pop();
+    return (left ?? groups[0])?.viewColumn ?? vscode.ViewColumn.Beside;
+}
+
 async function navigateToStep(item: PathStep) {
     if (!item.resourceUri || item.lineNumber === undefined) {
         return;
@@ -565,7 +584,7 @@ async function navigateToStep(item: PathStep) {
     treeDataProvider.moveStepLine(item, anchored);
     treeDataProvider.setCurrentStep(item);
 
-    const editor = await vscode.window.showTextDocument(document);
+    const editor = await vscode.window.showTextDocument(document, { viewColumn: stepColumn(document.uri) });
 
     const line = Math.min(item.lineNumber! - 1, document.lineCount - 1);
     const column = item.columnNumber || 0;

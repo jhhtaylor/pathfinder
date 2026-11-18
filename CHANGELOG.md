@@ -2,6 +2,12 @@
 
 All notable changes to the Pathfinder extension will be documented in this file.
 
+## [0.3.1] - 2026-11-18
+
+### Fixed
+
+- Clicking a step in the path map opens it in the editor group beside the map instead of covering the map, and a file that is already open is shown in the group where it is open.
+
 ## [0.3.0] - 2026-11-17
 
 ### Added

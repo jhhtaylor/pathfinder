@@ -78,4 +78,23 @@ suite('Extension smoke test', function () {
         await vscode.commands.executeCommand('pathfinder.goToStep', 'smoke', 2);
         assert.strictEqual(path.basename(vscode.window.activeTextEditor!.document.uri.fsPath), 'helper.ts');
     });
+
+    test('steps opened from the path map go to the editor group, not over the map', async () => {
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+        await vscode.commands.executeCommand('pathfinder.goToStep', 'smoke', 1);
+        const editorColumn = vscode.window.activeTextEditor!.viewColumn;
+        await vscode.commands.executeCommand('pathfinder.showPathMap', 'smoke');
+        await vscode.commands.executeCommand('workbench.action.focusNextGroup');
+        const mapColumn = vscode.window.tabGroups.activeTabGroup.viewColumn;
+        assert.notStrictEqual(mapColumn, editorColumn);
+
+        await vscode.commands.executeCommand('pathfinder.goToStep', 'smoke', 2);
+        assert.strictEqual(vscode.window.activeTextEditor!.viewColumn, editorColumn);
+
+        await vscode.commands.executeCommand('workbench.action.focusNextGroup');
+        await vscode.commands.executeCommand('pathfinder.goToStep', 'smoke', 1);
+        assert.strictEqual(vscode.window.activeTextEditor!.viewColumn, editorColumn);
+        const mapGroup = vscode.window.tabGroups.all.find(g => g.viewColumn === mapColumn)!;
+        assert.ok(mapGroup.tabs.every(t => !(t.input instanceof vscode.TabInputText)), 'no file should open in the map group');
+    });
 });

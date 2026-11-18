@@ -222,6 +222,11 @@ export class PathMapPanel implements vscode.Disposable {
     private readonly disposables: vscode.Disposable[] = [];
     private renderToken = 0;
 
+    static visibleColumn(): vscode.ViewColumn | undefined {
+        const panel = PathMapPanel.instance?.panel;
+        return panel?.visible ? panel.viewColumn : undefined;
+    }
+
     static show(provider: PathfinderDataProvider, pathId: string) {
         if (PathMapPanel.instance) {
             PathMapPanel.instance.pathId = pathId;
