@@ -2,6 +2,12 @@
 
 All notable changes to the Pathfinder extension will be documented in this file.
 
+## [0.3.4] - 2026-11-18
+
+### Changed
+
+- The extension page links to the new Pathfinder trailer and feature tour on YouTube.
+
 ## [0.3.3] - 2026-11-18
 
 ### Fixed
